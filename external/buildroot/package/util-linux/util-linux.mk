@@ -34,6 +34,12 @@ UTIL_LINUX_CONF_OPTS += \
 	--disable-rpath \
 	--disable-makeinstall-chown
 
+# liblastlog2 needs the sqlite3 library. The image does not use lastlog2 and
+# it does not have sqlite3, so the build fails with "liblastlog2 selected,
+# but required sqlite3 library not available". Turning it off keeps sqlite3
+# out of the image.
+UTIL_LINUX_CONF_OPTS += --disable-liblastlog2
+
 UTIL_LINUX_LINK_LIBS = $(TARGET_NLS_LIBS)
 
 HOST_UTIL_LINUX_DEPENDENCIES = host-pkgconf

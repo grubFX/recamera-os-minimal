@@ -126,6 +126,21 @@ for patch in "$EXTERNAL/build/patches"/*.patch; do
 done
 popd
 rsync_dir $EXTERNAL/buildroot/ $BUILDROOT_DIR/
+
+# The Buildroot submodule carries local-only fixes that cannot be pushed
+# upstream, ship them as patches here instead. The patch is applied in the
+# output, after the submodule was copied there.
+pushd "$PROJECT_OUT/$BUILDROOT_DIR"
+for patch in "$EXTERNAL/buildroot/patches"/*.patch; do
+    [ -f "$patch" ] || continue
+    echo "Applying buildroot patch: $(basename "$patch")"
+    patch -p1 --forward < "$patch" || {
+        echo "Error: Failed to apply $patch"
+        exit 1
+    }
+done
+popd
+
 rsync_dir $EXTERNAL/isp_tuning .
 rsync_dir $EXTERNAL/ramdisk/ ramdisk/
 rsync_dir $EXTERNAL/u-boot/ $UBOOT_DIR/
@@ -197,14 +212,30 @@ popd
 echo "All patches applied successfully."
 
 # patch buildroot packages
+# The directory in external/buildroot/package only holds the files that
+# differ from the Buildroot in the submodule. The output holds the complete
+# package, copied from the submodule. So the files are copied on top of it.
+# A file that this tree removed from the overlay has to be removed from the
+# output as well, otherwise it is still there and, in the case of a patch,
+# still applied. The files that belong to the Buildroot in the submodule stay.
 for subdir in $EXTERNAL/buildroot/package/*; do
     if [ -d $subdir ]; then
         pkg_name=$(basename $subdir)
-        if [ -f $subdir/Config.in ]; then
-            rsync -av --delete $subdir/ $PROJECT_OUT/$BUILDROOT_DIR/package/$pkg_name/
-        else
-            rsync -av $subdir/ $PROJECT_OUT/$BUILDROOT_DIR/package/$pkg_name/
+        dst="$PROJECT_OUT/$BUILDROOT_DIR/package/$pkg_name/"
+        src="$TOPDIR/$BUILDROOT_DIR/package/$pkg_name/"
+        if [ ! -d "$dst" ]; then
+            echo "WARNING: package $pkg_name is not in the Buildroot tree, skipped"
+            continue
         fi
+        for f in "$dst"*; do
+            [ -e "$f" ] || continue
+            name=$(basename "$f")
+            if [ ! -e "$subdir/$name" ] && [ ! -e "$src/$name" ]; then
+                echo "removing stale $pkg_name/$name"
+                rm -rf "$f"
+            fi
+        done
+        rsync -av $subdir/ $dst
     fi
 done
 
