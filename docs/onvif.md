@@ -48,6 +48,91 @@ GetEndpointReference
 
 That is the full set an NVR needs to discover the camera, read the profile list and connect to the stream.
 
+### Which profile it follows
+
+**It follows Profile S, not Profile T.** The namespaces in the SOAP envelope decide it:
+
+```cpp
+// solutions/sscma-node/main/node/onvif/onvif_soap.cpp:25
+"xmlns:tds=\"http://www.onvif.org/ver10/device/wsdl\" "
+"xmlns:tt=\"http://www.onvif.org/ver10/schema\" "
+"xmlns:trt=\"http://www.onvif.org/ver10/media/wsdl\">";
+```
+
+`ver10/media/wsdl` with the `trt` prefix is ONVIF **Media 1**, which is the specification behind **Profile S**. Profile T is built on ONVIF Media 2, which uses the `ver20` namespaces and the `tr2` prefix. There is not a single `tr2` or `ver20` in the code:
+
+```
+$ grep -ohE 'tr2:|tt2:|ver20' *.cpp | sort | uniq -c
+(no output)
+```
+
+The service list confirms it:
+
+```
+// solutions/sscma-node/main/node/onvif/onvif_soap.cpp:54
+const char* namespaces[] = {
+    "http://www.onvif.org/ver10/device/wsdl",
+    "http://www.onvif.org/ver10/media/wsdl",
+};
+```
+
+And the WS-Discovery responder advertises the same thing:
+
+```
+// solutions/sscma-node/main/node/onvif/onvif_discovery.cpp:170
+"<d:Types>dn:NetworkVideoTransmitter</d:Types>"
+```
+
+That type is the one Profile S devices answer with.
+
+**Profile S is being deprecated.** The ONVIF site says the last date for product conformance submissions is 31 March 2027. That does not affect the code, but it affects the plan, because a camera that is meant to live for years should not be built on a profile that is being retired.
+
+### What is missing for Profile S conformance
+
+The implementation is a working subset, not a conformant Profile S device. The gaps that matter for a client:
+
+| Area | What is missing |
+|---|---|
+| Video encoder configuration | `GetVideoEncoderConfiguration` exists, `GetVideoEncoderConfigurations` does not |
+| Video source configuration | `GetVideoSourceConfigurations` and `GetVideoSourceConfiguration` do not exist |
+| The `VideoSourceConfiguration` in `GetProfiles` | Points at the hardcoded `video_src_0`, which is not a real source |
+| Configuration change | Nothing. There is no `Set` operation for any configuration |
+| Imaging | None. Profile S covers it as conditional |
+| Events | None. Conditional in Profile S |
+| PTZ | None. Conditional in Profile S |
+| Audio | The RTSP side supports an audio track, the ONVIF side says nothing about it |
+
+The profile list itself is the part that works best. `GetProfiles` returns a `VideoSourceConfiguration` and a `VideoEncoderConfiguration` per profile, with the right tokens, and `GetStreamUri` resolves them. That is the path an NVR takes: discover, list, connect.
+
+What a client cannot do is change anything. For a camera that is fine, and it is what the vendor device does as well.
+
+### The version it reports
+
+```
+// solutions/sscma-node/main/node/onvif/onvif_soap.cpp:63
+<tds:Version><tds:Major>2</tds:Major><tds:Minor>60</tds:Minor></tds:Version>
+```
+
+Version 2.60 is the Media 1 era. A client that asks for a newer version gets the same answer. That is what the vendor ships, and it works with the NVRs that were tested.
+
+### Profile T, if it is wanted
+
+Profile T is the one that is not deprecated, and it is the one most new NVRs default to. It is a bigger job:
+
+| | Profile S, what the code does | Profile T |
+|---|---|---|
+| Media service | Media 1, `ver10` | Media 2, `ver20`, the `tr2` prefix |
+| Imaging | none | `GetImagingSettings`, `SetImagingSettings`, and the whole imaging configuration tree |
+| Events | none | The event service, `ver10/events/wsdl` |
+| Metadata | none | `GetMetadataConfigurations`, and the metadata stream over RTSP |
+| ONscreen display | none | Mandatory for the device in Profile T |
+| HTTPS | no | Mandatory in Profile T |
+| H.265 | no | Mandatory in Profile T |
+
+Moving the media service from Media 1 to Media 2 is not a namespace swap. The operation names change, the request and response types change, and the configuration model changes from a flat structure to the Media 2 tree with `VideoSourceConfiguration` and `VideoEncoderConfiguration` extensions.
+
+That is a separate project. The honest position is: the vendor implementation is a Profile S device, it works with the NVRs it was tested against, and it is what the minimal image gets.
+
 ### Authentication
 
 `checkAuth` in `onvif_soap.cpp` implements the WS-UsernameToken. The password is accepted as plaintext or as `Base64(SHA1(Nonce + Created + password))`, which is the digest form ONVIF clients send. Credentials are compared against the registered profiles.
@@ -225,8 +310,24 @@ The ONVIF service port is separate from the RTSP port. 8899 is fine, it does not
 - **No PTZ.** The vendor implementation has no PTZ support. A camera with a gimbal would need the four ONVIF PTZ operations added. The gimbal talks CAN, and the CAN side was in `node-red-contrib-seeed-recamera`.
 - **No snapshot.** There is no snapshot operation in the vendor implementation. Many clients show a blank thumbnail without it.
 - **No events.** There is no event service. Without the AI stack there is nothing to report anyway.
+- **No configuration.** Nothing in the implementation changes a setting. The camera is configured through the ONVIF profile list and the RTSP stream, not through ONVIF.
+- **No Profile T.** The implementation is a Profile S device, and Profile S is being deprecated. See the profile section above.
 
-These three are the same gaps that `onvif_simple_server` would have. They are additive work on top of the extracted module, not a reason to choose a different implementation.
+These are the same gaps that `onvif_simple_server` would have. They are additive work on top of the extracted module, not a reason to choose a different implementation.
+
+### The Profile S question, stated plainly
+
+The decision to use the vendor implementation means the image ships a **Profile S** device. That has three consequences:
+
+| Consequence | What it means |
+|---|---|
+| It works | The vendor version was tested against real NVRs, and the field bugs are fixed. Hikvision and Dahua NVRs are the ones that were tested. |
+| It is not conformant | A conformant device needs the full operation set of the profile. This is a working subset. |
+| It is on a retiring profile | Profile S conformance submissions close on 31 March 2027. |
+
+Whether that is the right trade depends on what the camera is for. For a camera that shows up in an NVR and streams, it is the right trade, because the alternative is writing an ONVIF implementation from scratch, which is a much bigger job than adding Profile T to an existing one.
+
+If a new NVR is the target and it only speaks Profile T, then the work is different: the media service moves to Media 2, the imaging service and the event service get added, and the whole configuration model changes. That is its own project, the same way a kernel port is.
 
 ## Where the code comes from
 

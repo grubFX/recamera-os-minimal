@@ -111,9 +111,13 @@ The dependency situation is the reason to prefer it:
 
 No new dependency in the image, and the implementation was tested against real NVRs, including the fix for a truncated `GetCapabilities` response that Hikvision NVRs read as invalid XML.
 
+**It is a Profile S implementation, not Profile T.** The SOAP envelope uses the `ver10` namespaces and the `trt` prefix, which is ONVIF Media 1, the specification behind Profile S. There is no `tr2` and no `ver20` anywhere in the code. Profile S is being deprecated, the last date for conformance submissions is 31 March 2027.
+
+The consequence for the requirement: the camera is discoverable and streams, which is what the requirement asks for. It is not conformant, and it is not Profile T. Moving it to Media 2 is a separate project.
+
 The work is the extraction. The code is compiled into `sscma-node`, the Node-RED node binary, and it has to become a standalone daemon. The vendor coupling is four symbols: `ma::Mutex`, `ma::Guard`, `ma_err_t` and `PROJECT_VERSION`.
 
-The details are in [onvif.md](./onvif.md).
+The details, including what is missing for conformance, are in [onvif.md](./onvif.md).
 
 ## 7. No known CVE in the network facing packages
 

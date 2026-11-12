@@ -701,7 +701,11 @@ ONVIF is a direct goal of the image, not a later idea. The camera speaks RTSP al
 
 The approach is not to write an ONVIF implementation. The vendor stack already has one, in the public Apache-2.0 repository, 1267 lines across 8 files, and it was tested against real NVRs. It is compiled into `sscma-node`, the Node-RED node binary, so it has to be lifted out into its own daemon.
 
-The details are in [onvif.md](./onvif.md).
+**It is a Profile S implementation.** The SOAP envelope uses the `ver10` namespaces and the `trt` prefix, which is ONVIF Media 1, the specification behind Profile S. Profile T would need Media 2, the `ver20` namespaces and the `tr2` prefix, and there is not one `tr2` in the code. Profile S is being deprecated, the last conformance submission date is 31 March 2027.
+
+That is the right trade for this image. The camera has to show up in an NVR and stream, and this does that with no new dependency. Profile T is a separate project, the same way a kernel port is.
+
+The details, including what is missing for Profile S conformance, are in [onvif.md](./onvif.md).
 
 ### Step 7.1: Extract the module
 
