@@ -163,6 +163,7 @@ The plan is in [docs/plan.md](./docs/plan.md). The decisions and the evidence be
 | Document | What it covers |
 |---|---|
 | [plan.md](./docs/plan.md) | The work plan. Eight steps, every step with a goal, a concrete change and a check. |
+| [decisions.md](./docs/decisions.md) | The scope decisions and the reasoning behind each one. |
 | [requirements.md](./docs/requirements.md) | The eight hard requirements and their status. |
 | [minimal-os.md](./docs/minimal-os.md) | What stays in the image and what goes, and why. |
 | [submodule-review.md](./docs/submodule-review.md) | All 25 submodules, checked for forks, blobs and hidden code. |

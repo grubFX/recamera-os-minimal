@@ -86,7 +86,7 @@ The detail that matters: the download URL in `upgrade.sh` points at the vendor r
 | Snapshot | yes |
 | Wireless | open, depends on the board, the default is the BCM only |
 
-The reasoning behind each one is in [requirements.md](./requirements.md), requirement 9.
+The reasoning behind each one is in [requirements.md](./requirements.md), requirement 9, and in full in [decisions.md](./decisions.md).
 
 ## How the image is put together
 

@@ -127,7 +127,7 @@ Work happens on the `develop` branch of `grubFX/recamera-os-minimal`, in small c
 
 The scope of the minimal image is decided. These are the answers, with the reasoning behind each one.
 
-**This section is the authority on the scope.** The plan steps carry the same decisions inline, and where the two differ, this section wins.
+**This section is the authority on the scope.** The plan steps carry the same decisions inline, and where the two differ, this section wins. The decisions are also collected on their own in [decisions.md](./decisions.md), with the reasoning behind each one in full.
 
 | Question | Decision | Reason |
 |---|---|---|
