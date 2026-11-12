@@ -1,0 +1,93 @@
+From: recamera-os <noreply@recamera.local>
+Subject: [PATCH] build: name the root filesystem image rootfs_ext4
+
+The board overlay in external/build refers to the root filesystem as
+"rootfs_ext4.<storage>": the partition XML of sg2002_recamera_emmc names
+it that way, sd_gen_burn_image.sh and sd_gen_recovery_image.sh copy it,
+the sw-description of the OTA update installs it and the on-device
+upgrade.sh reads it out of the OTA archive.
+
+The vendor build system however produced the image as "rootfs.<storage>".
+The vendor renamed its own images in commit 46c6a37 ("build: weekly rls
+2025.12.17") and updated the partition XMLs that ship with it, but the
+board overlay predates that rename and was not updated with it.
+
+Nothing reconciled the two names, and the mismatch failed silently in
+three places at once:
+
+  - raw2cimg.py compares the file name of the image it is called with
+    against the file name of the partition in the XML and packs the image
+    only if the two match. The names differ, so the root filesystem was
+    left out of the flash image.
+  - mk_package.py skips every partition whose file is missing, so the
+    upgrade.zip contained no root filesystem either.
+  - The .swu archive was built from the file list of the sw-description
+    and ended up empty apart from the description.
+
+The image is therefore named the way the board expects it, which makes
+the partition XML, the SD tools, the OTA description and the on-device
+upgrade script all agree on one name.
+
+The copy uses --remove-destination, like the rest of the build system.
+Without it cp writes through a symlink that an earlier build left in the
+output directory, and the symlink then ends up in the .swu archive as a
+link instead of the image it points at.
+
+The kernel modules are cleared before they are copied again. The copy
+only overwrites what it finds, so a module that a previous build put
+there and that the current build does not build any more stays in the
+root filesystem. On this board that is how the wireless modules
+survived the removal of the wireless stack.
+
+Generated with diff -u against build as vendored in this repo.
+
+---
+Makefile | 17 ++++++++++++++-----
+1 file changed, 9 insertions(+), 8 deletions(-)
+
+--- a/Makefile
++++ b/Makefile
+@@ -256,6 +256,7 @@
+ 
+ define copy_ko_action
+ 	${Q}mkdir -p ${SYSTEM_OUT_DIR}/ko
++	${Q}rm -f ${SYSTEM_OUT_DIR}/ko/*.ko
+ 	${Q}find ${1} -name '*.ko' -exec cp -f {} ${SYSTEM_OUT_DIR}/ko/ \;
+ endef
+ 
+@@ -653,11 +654,11 @@
+ 	${Q}$(MAKE) -j${NPROC} -C $(BR_DIR)
+ 	# ${Q}rm -rf $(BR_ROOTFS_DIR)/*
+ 	# copy rootfs to rawimg dir
+-	${Q}cp $(TARGET_OUTPUT_DIR)/images/rootfs.ext4 $(OUTPUT_DIR)/rawimages/rootfs.$(STORAGE_TYPE)
++	${Q}cp --remove-destination $(TARGET_OUTPUT_DIR)/images/rootfs.ext4 $(OUTPUT_DIR)/rawimages/rootfs_ext4.$(STORAGE_TYPE)
+ ifeq ($(CONFIG_SUP_LARGE_PART_SIZE),y)
+-	$(call raw2cimg_lps ,rootfs.$(STORAGE_TYPE))
++	$(call raw2cimg_lps ,rootfs_ext4.$(STORAGE_TYPE))
+ else
+-	$(call raw2cimg ,rootfs.$(STORAGE_TYPE))
++	$(call raw2cimg ,rootfs_ext4.$(STORAGE_TYPE))
+ endif
+ 
+ # TODO A/B boot is currently not supported when CONFIG_BUILDROOT_FS is enabled
+@@ -670,7 +671,7 @@
+ 	$(call print_target)
+ ifneq ($(STORAGE_TYPE), sd)
+ ifeq ($(CONFIG_AB_SYSTEM),y)
+-	${Q}cp $(OUTPUT_DIR)/rawimages/rootfs.$(STORAGE_TYPE) $(OUTPUT_DIR)/rawimages/rootfs_b.$(STORAGE_TYPE)
++	${Q}cp --remove-destination $(OUTPUT_DIR)/rawimages/rootfs_ext4.$(STORAGE_TYPE) $(OUTPUT_DIR)/rawimages/rootfs_b.$(STORAGE_TYPE)
+ ifeq ($(CONFIG_SUP_LARGE_PART_SIZE),y)
+ 	$(call raw2cimg_lps ,rootfs_b.$(STORAGE_TYPE))
+ else
+@@ -678,9 +679,9 @@
+ endif # CONFIG_SUP_LARGE_PART_SIZE
+ endif # CONFIG_AB_SYSTEM
+ ifeq ($(CONFIG_SUP_LARGE_PART_SIZE),y)
+-	$(call raw2cimg_lps ,rootfs.$(STORAGE_TYPE))
++	$(call raw2cimg_lps ,rootfs_ext4.$(STORAGE_TYPE))
+ else
+-	$(call raw2cimg ,rootfs.$(STORAGE_TYPE))
++	$(call raw2cimg ,rootfs_ext4.$(STORAGE_TYPE))
+ endif # CONFIG_SUP_LARGE_PART_SIZE
+ endif # CONFIG_AB_SYSTEM
+ endif # CONFIG_BUILDROOT_FS
