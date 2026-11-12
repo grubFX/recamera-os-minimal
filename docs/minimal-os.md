@@ -61,6 +61,8 @@ None of these are patches on top of upstream Linux. They are the vendor tree, an
 | `onvif_simple_server` | The ONVIF server | The Profile T services. The vendor implementation is a Profile S device, Media 1 with plaintext password over plain HTTP. `onvif_simple_server` has the Media 2, imaging and event services already. It is GPL-3.0, which is the open question in [onvif.md](./onvif.md). |
 | `lighttpd` with OpenSSL | The web server in front of the ONVIF CGI | Profile T requires HTTPS. lighttpd 1.4.59 is in the upstream Buildroot tree with the `BR2_PACKAGE_LIGHTTPD_OPENSSL` option, and the CGI interface of `onvif_simple_server` is the standard way to run it behind TLS. |
 | `acme.sh` | The ACME client for the certificate | The camera gets a certificate it can renew on its own, without a port open on the router. POSIX shell, it needs `curl` and `openssl`, both already in the image. |
+| `acme-provider` | The script that picks the DNS provider | The choice is in the overlay, with all 205 providers that `acme.sh` supports and an interactive `dialog` menu. The provider and its credentials go into `/etc/acme.sh/provider.conf`. |
+| `dialog` | The menu library for the provider selection | It is in the upstream Buildroot tree, LGPL-2.1. |
 | `openssh` 10.6p2 | The SSH server, bumped from 8.6p1 | CVE-2026-123158, the musl authentication bypass. This image has all three conditions: OpenSSH before 10.6p2, musl, and no PAM. See [requirements.md](./requirements.md). |
 
 ### The wireless stack: no radio at all

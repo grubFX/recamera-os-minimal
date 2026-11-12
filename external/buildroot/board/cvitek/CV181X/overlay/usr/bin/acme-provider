@@ -1,0 +1,407 @@
+#!/bin/sh
+#
+# acme-provider: choose the DNS provider for the ACME DNS-01 challenge.
+#
+# The camera gets its certificate from an ACME server. The DNS-01 challenge
+# is the one that works without a port open on the router: the camera writes
+# a TXT record for the domain through the DNS provider API, and the ACME
+# server checks it there.
+#
+# The script stores the provider code and its credentials in
+# /etc/acme.sh/provider.conf, and acme.sh reads them from there.
+#
+# Usage:
+#   acme-provider list          show the providers and the current choice
+#   acme-provider set <code>    choose a provider
+#   acme-provider creds <code>  set the credentials of a provider
+#   acme-provider show          show the stored configuration
+#
+
+CONF=${CONF:-/etc/acme.sh/provider.conf}
+
+PROVIDERS="
+1984hosting:1984Hosting
+abion:Abion
+acmedns:Acmedns
+acmeproxy:Acmeproxy
+active24:Active24
+ad:Ad
+ali:Alibaba Cloud
+alviy:Alviy
+anx:Anx
+artfiles:Artfiles
+arubabusiness:Arubabusiness
+arvan:Arvan
+aurora:Aurora
+autodns:Autodns
+aws:AWS Route 53
+azion:Azion
+azure:Microsoft Azure
+baidu:Baidu
+beget:Beget
+bergdns:Bergdns
+bh:Bh
+bhosted:Bhosted
+bookmyname:Bookmyname
+bunny:Bunny
+calrissia:Calrissia
+cdmon:Cdmon
+cf:Cloudflare
+clouddns:Clouddns
+cloudns:ClouDNS
+cn:Cn
+comlaude:Comlaude
+connbyte:Connbyte
+conoha:ConoHa
+constellix:Constellix
+cpanel:Cpanel
+cpanel_uapi:Cpanel Uapi
+creoline:Creoline
+curanet:Curanet
+cyon:Cyon
+czechia:Czechia
+da:Da
+ddnss:Ddnss
+desec:deSEC
+df:Df
+dgon:Dgon
+dnsexit:Dnsexit
+dnshome:Dnshome
+dnsimple:DNSimple
+dnsmint:DNSMint
+dnsservices:Dnsservices
+doapi:DigitalOcean (legacy)
+domeneshop:Domeneshop
+dp:DigitalOcean
+dpi:Dpi
+dreamhost:Dreamhost
+duckdns:Duck DNS
+durabledns:Durabledns
+dyn:Dyn
+dynu:Dynu
+dynv6:Dynv6
+easydns:Easydns
+edgecenter:Edgecenter
+edgedns:Akamai EdgeDNS
+efficientip:Efficientip
+eurodns:Eurodns
+euserv:Euserv
+exoscale:Exoscale
+firestorm:Firestorm
+fornex:Fornex
+freedns:Freedns
+freemyip:Freemyip
+gandi_livedns:Gandi Livedns
+gcloud:Google Cloud
+gcore:G-Core
+gd:Gd
+geoscaling:Geoscaling
+glesys:Glesys
+gname:Gname
+googledomains:Googledomains
+he:He
+he_ddns:He Ddns
+hestiacp:Hestiacp
+hetznercloud:Hetzner Cloud
+hexonet:Hexonet
+hostingde:Hostingde
+hostinger:Hostinger
+hosttech:Hosttech
+hostup:Hostup
+huaweicloud:Huaweicloud
+hw:Hw
+infoblox:Infoblox
+infoblox_uddi:Infoblox Uddi
+infomaniak:Infomaniak
+internetbs:Internet.bs
+inwx:Inwx
+ionos:IONOS
+ionos_cloud:Ionos Cloud
+ipprojects:Ipprojects
+ipv64:Ipv64
+ispconfig:Ispconfig
+jd:Jd
+joker:Joker
+kappernet:Kappernet
+kas:Kas
+kinghost:Kinghost
+knot:Knot
+la:La
+laodc:Laodc
+leaseweb:Leaseweb
+level27:Level27
+lexicon:Lexicon
+limacity:Limacity
+linode_v4:Linode / Akamai
+loopia:Loopia
+lua:Lua
+maradns:Maradns
+me:Me
+mgwm:Mgwm
+miab:Miab
+mijnhost:Mijnhost
+misaka:Misaka
+muumuu:Muumuu
+mvmnet:Mvmnet
+myapi:Myapi
+mydevil:Mydevil
+mydnsjp:Mydnsjp
+myloc:Myloc
+mythic_beasts:Mythic Beasts
+namecheap:Namecheap
+namecom:Namecom
+namesilo:NameSilo
+nanelo:Nanelo
+nederhost:Nederhost
+neodigit:Neodigit
+netcup:Netcup
+netlify:Netlify
+nexdns:Nexdns
+nic:Nic
+njalla:Njalla
+nm:Nm
+nsd:Nsd
+nsone:Nsone
+nsupdate:Nsupdate
+nw:Nw
+oci:Oci
+omglol:Omglol
+one:One
+online:Online
+openprovider:Openprovider
+openprovider_rest:Openprovider Rest
+openstack:Openstack
+opnsense:Opnsense
+opteamax:Opteamax
+optidata:Optidata
+opusdns:Opusdns
+ovh:OVH
+pblin:Pblin
+pdns:Pdns
+pleskxml:Pleskxml
+pointhq:Pointhq
+porkbun:Porkbun
+poweradmin:Poweradmin
+primedns:Primedns
+qc:Qc
+rackcorp:Rackcorp
+rackspace:Rackspace
+rage4:Rage4
+rcode0:Rcode0
+regru:Regru
+rltx:Rltx
+scaleway:Scaleway
+schlundtech:Schlundtech
+selectel:Selectel
+selfhost:Self-hosted DNS
+servercow:Servercow
+simply:Simply
+sitehost:Sitehost
+sotoon:Sotoon
+spaceship:Spaceship
+subreg:Subreg
+technitium:Technitium
+tele3:Tele3
+tencent:Tencent Cloud
+timeweb:Timeweb
+transip:Transip
+udr:Udr
+ultra:Ultra
+unoeuro:Unoeuro
+variomedia:Variomedia
+veesp:Veesp
+vercel:Vercel
+virakcloud:Virakcloud
+volcengine:Volcano Engine
+vscale:Vscale
+vultr:Vultr
+websupport:Websupport
+wedos:Wedos
+west_cn:West.cn
+world4you:World4You
+yandex360:Yandex360
+yc:Yc
+zilore:Zilore
+zone:Zone
+zoneedit:Zoneedit
+zonomi:Zonomi
+"
+
+usage() {
+    cat <<EOF
+Usage:
+  acme-provider menu              choose the provider from a list
+  acme-provider list             list the supported DNS providers
+  acme-provider set <code>       choose the DNS provider
+  acme-provider creds <code>     set the credentials of a provider
+  acme-provider show             show the stored configuration
+
+The provider list is the one of acme.sh. The codes are the file names in
+its dnsapi directory, so "cf" is Cloudflare and "aws" is Route 53.
+EOF
+}
+
+read_conf() {
+    [ -f "$CONF" ] || return 0
+    . "$CONF"
+}
+
+provider_name() {
+    echo "$PROVIDERS" | grep "^$1:" | cut -d: -f2-
+}
+
+provider_exists() {
+    echo "$PROVIDERS" | grep -q "^$1:"
+}
+
+cmd_list() {
+    echo "$PROVIDERS" | while IFS=: read -r code name; do
+        [ -n "$code" ] || continue
+        current=""
+        read_conf
+        [ "$DNS_PROVIDER" = "$code" ] && current="  <- current"
+        printf '  %-16s %s%s\n' "$code" "$name" "$current"
+    done
+}
+
+cmd_set() {
+    if [ -z "$1" ]; then
+        echo "Which provider? Run 'acme-provider list' for the list." >&2
+        exit 1
+    fi
+    if ! provider_exists "$1"; then
+        echo "Unknown provider '$1'. Run 'acme-provider list' for the list." >&2
+        exit 1
+    fi
+    mkdir -p "$(dirname "$CONF")"
+    read_conf
+    DNS_PROVIDER="$1"
+    export DNS_PROVIDER
+    if ! grep -q "^DNS_PROVIDER=" "$CONF" 2>/dev/null; then
+        echo "DNS_PROVIDER=$DNS_PROVIDER" >> "$CONF"
+    else
+        sed -i "s|^DNS_PROVIDER=.*|DNS_PROVIDER=$DNS_PROVIDER|" "$CONF"
+    fi
+    echo "Provider set to $1 ($(provider_name "$1"))."
+    echo "Now set the credentials: acme-provider creds $1"
+}
+
+cmd_creds() {
+    if [ -z "$1" ]; then
+        echo "Which provider? Run 'acme-provider list' for the list." >&2
+        exit 1
+    fi
+    if ! provider_exists "$1"; then
+        echo "Unknown provider '$1'." >&2
+        exit 1
+    fi
+    echo "The credentials for $1 come from acme.sh's own environment variables."
+    echo "The variables are listed at the top of the provider script:"
+    echo
+    echo "  /usr/share/acme.sh/dnsapi/dns_$1.sh"
+    echo
+    echo "The usual ones are:"
+    echo
+    case "$1" in
+        cf)
+            echo "  CF_Token      an API token with permission to edit the DNS zone"
+            echo "  CF_Account_ID the account id, if the token is scoped to an account"
+            ;;
+        aws)
+            echo "  AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY"
+            echo "  or an IAM role, or AWS_SESSION_TOKEN with temporary credentials"
+            ;;
+        azure)
+            echo "  AZURE_Api_Key, AZURE_Application_Id, AZURE_Application_Key"
+            echo "  AZURE_Tenant_Id, AZURE_Subscription_Id"
+            ;;
+        dp)
+            echo "  DP_Token      an API token"
+            ;;
+        hetznercloud)
+            echo "  HETZNER_Token an API token"
+            ;;
+        ali)
+            echo "  Ali_Key, Ali_Secret  the access key id and the secret"
+            ;;
+        gcloud)
+            echo "  GCE_Project, GCE_Default_Zone, GCE_Default_Instance"
+            echo "  GCE_Service_Account_JSON_Key"
+            ;;
+        *)
+            echo "  The header of the script lists the variables it reads."
+            ;;
+    esac
+    echo
+    echo "Put them in /etc/acme.sh/provider.conf, one per line, for example:"
+    echo
+    echo "  CF_Token='...'"
+}
+
+cmd_menu() {
+    if ! command -v dialog >/dev/null 2>&1; then
+        echo "dialog is not installed, falling back to the text list." >&2
+        cmd_list
+        return
+    fi
+
+    read_conf
+    current="$DNS_PROVIDER"
+
+    # Die Liste fuer dialog: "Code Name" wird zu "Name (Code)".
+    items=$(echo "$PROVIDERS" | while IFS=: read -r code name; do
+        [ -n "$code" ] || continue
+        if [ "$code" = "$current" ]; then
+            printf '"%s (%s) *"
+' "$name" "$code"
+        else
+            printf '"%s (%s)"
+' "$name" "$code"
+        fi
+    done)
+
+    choice=$(dialog --title "ACME DNS provider" \
+        --menu "Choose the DNS provider for the DNS-01 challenge.\n\nThe asterisk marks the current one.\nThe credentials are set afterwards with 'acme-provider creds <code>'." \
+        20 70 18 \
+        $items 2>&1)
+
+    if [ $? -ne 0 ] || [ -z "$choice" ]; then
+        echo "Cancelled."
+        return
+    fi
+
+    code=$(echo "$choice" | sed 's/.*(\([a-z0-9_]*\)).*/\1/')
+    if ! provider_exists "$code"; then
+        echo "Could not read the provider code from '$choice'." >&2
+        exit 1
+    fi
+
+    cmd_set "$code"
+
+    echo
+    cmd_creds "$code"
+}
+
+cmd_show() {
+    if [ ! -f "$CONF" ]; then
+        echo "No configuration yet. Run 'acme-provider set <code>'."
+        exit 0
+    fi
+    echo "Configuration in $CONF:"
+    echo
+    sed 's/=.*/=<set>/' "$CONF" | grep -v '^#'
+    echo
+    read_conf
+    if [ -n "$DNS_PROVIDER" ]; then
+        echo "DNS provider: $DNS_PROVIDER ($(provider_name "$DNS_PROVIDER"))"
+    fi
+}
+
+case "$1" in
+    menu) cmd_menu ;;
+    list) cmd_list ;;
+    set) cmd_set "$2" ;;
+    creds) cmd_creds "$2" ;;
+    show) cmd_show ;;
+    *) usage; exit 1 ;;
+esac

@@ -1,0 +1,10 @@
+config BR2_PACKAGE_DIALOG
+	bool "dialog"
+	default y
+	help
+	  A program for displaying dialog boxes from shell scripts.
+
+	  It is used by the acme-provider script in the image, to pick the
+	  DNS provider for the ACME DNS-01 challenge from a list.
+
+	  http://invisible-island.net/dialog/dialog.html

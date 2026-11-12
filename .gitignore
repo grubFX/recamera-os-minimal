@@ -32,3 +32,4 @@ output*/
 
 # vscode generated files
 .vscode*
+build-host.log

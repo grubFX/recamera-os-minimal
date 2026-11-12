@@ -108,6 +108,12 @@ The open source candidates were checked on the source, not on the README:
 
 **The open question is the license.** GPL-3.0 for the image is a distribution decision for the maintainer, not a technical obstacle. The alternative, porting the Media 2 service into the Apache-2.0 vendor code, is an independent implementation and not a port.
 
+**Decision: GPL-3.0, `onvif_simple_server`.** The analysis is in [onvif.md](./onvif.md). The short version:
+
+- The GPL-2.0-only code in the image is all kernel code, 2492 kernel modules plus one UAPI header. A kernel module and a userspace program are separate programs in separate address spaces, an aggregate and not a derivative work.
+- The CVI SDKs have no license at all, no LICENSE file and no SPDX identifier, so they are proprietary. That is unchanged by this decision, and it is the same situation as the upstream reCamera-OS image.
+- The choice obliges you to publish the source of the ONVIF server and of anything linking into it. It does not oblige you to publish the proprietary SDK.
+
 The work is then: the Media 2 service, the TLS termination, the H.265 SDP patch for `cvi_rtsp`, and the certificate.
 
 The details, including the full comparison, the TLS setup and the ACME certificate options, are in [onvif.md](./onvif.md).

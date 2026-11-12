@@ -18,8 +18,11 @@
         }
     },
     // The build needs the cvitec riscv64 musl toolchain from the host-tools
-    // submodule. It is a submodule of this repository, so it is cloned with
-    // the rest of them. The toolchain itself lives in
+    // submodule, and most of the other submodules: the kernel, the u-boot,
+    // the Buildroot tree, the CVI SDKs, the ramdisk. They are all submodules
+    // of this repository, so they are cloned with the rest of them.
+    //
+    // The toolchain itself lives in
     // host-tools/gcc/riscv64-linux-musl-x86_64 and is selected by
     // external/setenv.sh through CROSS_COMPILE_PATH_MUSL_RISCV64.
     //
@@ -27,9 +30,19 @@
     // the image, at /opt/toolchains/riscv64-musl. The swap of the cvitec
     // sysroot runtime libraries happens in the build, see
     // external/scripts/setup-node26-toolchain.sh.
-    "postCreateCommand": "git submodule update --init --recursive --depth 1 host-tools",
+    //
+    // The clone is shallow on purpose. The full history of the Linux
+    // submodule is several gigabytes and the build does not need it.
+    "postCreateCommand": "git submodule update --init --recursive --depth 1",
     "remoteUser": "vscode",
     "containerEnv": {
         "TC_ROOT": "/opt/toolchains/riscv64-musl"
-    }
+    },
+    // The build runs in the container and writes to output/ in the
+    // workspace, which is the host's directory. The container stays up while
+    // the build runs, so the build is not killed by a terminal that closes.
+    "shutdownAction": "stopContainer",
+    // The image has no init system. The postCreateCommand runs once, after
+    // the container is created, and the shell is what the user gets.
+    "init": false
 }

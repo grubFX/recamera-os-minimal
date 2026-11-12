@@ -334,6 +334,66 @@ That is a download of an archive at build time, which needs a version check agai
 
 The license is the point against it. GPL-3.0 means the whole image would be GPL-3.0. The vendor implementation is Apache-2.0, and the rest of the vendor stack is a mix. Whether that matters depends on how the image is distributed, and it is a question for the maintainer, not a technical obstacle.
 
+### What GPL-3.0 means for this image
+
+The decision is GPL-3.0, and the question is whether that fits with everything else in the image. The answer needs three parts, because "the image is GPL-3.0" is not the whole truth.
+
+**Part one: the GPL-2.0-only code in the image is all kernel code.**
+
+The image contains GPL-2.0-only code, and that is normally a hard blocker for a GPL-3.0 distribution. It is not a blocker here, because of where that code sits:
+
+| Where | How many GPL-2.0-only files | What it is |
+|---|---|---|
+| `osdrv/interdrv`, `osdrv/extdrv` | 2492 | Kernel modules |
+| `cviruntime/src/soc/common/linux/ion.h` | 1 | A UAPI header, inline definitions only |
+
+A kernel module is GPL-2.0-only by definition. The Linux kernel is licensed under GPL-2.0, and a module that links into it inherits that. The rule that forbids mixing GPL-2.0-only with GPL-3.0-only applies to code that is *combined into one program*. A kernel module and a userspace program are two separate programs, in two separate address spaces, communicating over a syscall interface. They are an aggregate, not a derivative work.
+
+The one userspace file is a copy of the kernel's `ion.h` UAPI header. It contains the `ioctl` struct definitions and nothing else, so it is an interface description rather than an implementation.
+
+**Part two: the CVI SDKs are not open source at all.**
+
+This is the part that matters more than the GPL question. The CVI SDKs have no license:
+
+```
+$ ls cvi_rtsp/LICENSE* osdrv/LICENSE* cvi_mpi/LICENSE*
+(no output)
+
+$ grep -hE "LICENSE" external/br2-external/*/*.mk
+BT_INIT_LICENSE = Apache-2.0
+SSCMA_NODE_LICENSE = Apache-2.0
+SSCMA_SUPERVISOR_LICENSE = Apache-2.0
+OPENV4_LICENSE = Apache-2.0
+LIBXCRYPT_DEV_LICENSE = LGPL-2.1+
+```
+
+No LICENSE file, no SPDX identifier, no copyright holder in the package metadata. That means proprietary, all rights reserved. It is not compatible with GPL-3.0, it is not compatible with Apache-2.0, and it is not compatible with anything else.
+
+So the image is not "GPL-3.0". It is a distribution of proprietary vendor binaries with some free software around it, and the free software parts carry their own terms. That is the same situation as the upstream reCamera-OS image, which ships the same SDKs. Choosing GPL-3.0 for the ONVIF server does not change that, and it does not make it worse.
+
+**Part three: what the choice actually buys.**
+
+| | GPL-3.0 for the ONVIF server | Apache-2.0 vendor code |
+|---|---|---|
+| The image's free software | GPL-3.0 | A mix, no single license |
+| The CVI SDKs | still proprietary | still proprietary |
+| What the user gets | the source of everything that is open | the same |
+| What the user has to do | offer the source of the GPL-3.0 parts | nothing in particular |
+
+The GPL-3.0 choice is a statement about the parts that are open. It obliges you to publish the source of the ONVIF server and of anything that links into it, and it obliges anyone who distributes the image to do the same. It does not oblige you to publish the proprietary SDK, because that code is not yours to publish.
+
+The alternative, the Apache-2.0 vendor implementation, is only available if the Profile T services are written from scratch. That is a thousand lines of Media 2 work, and it buys nothing that the GPL version does not already give.
+
+### The alternatives, and why they are worse
+
+**LGPL-3.0.** `onvif_simple_server` is GPL-3.0, not LGPL. Relicensing it is not possible without the author's agreement, and asking for a different license for a project you want to use is a good way to get no.
+
+**Apache-2.0 via a clean-room rewrite.** Write the Media 2 operations independently, with the Apache-2.0 header, using the ONVIF specification as the reference. That is legitimate, and it is a real option. The cost is that the result is untested against real NVRs, because the field fixes that the vendor implementation carries were found the hard way.
+
+**Keep the vendor implementation and add only what Profile T strictly requires.** This sounds cheaper than it is. The profile requires the Media 2 service, the imaging service and the event service. That is the thousand lines.
+
+**Ship both.** The vendor implementation as the default, `onvif_simple_server` as an option. That doubles the maintenance surface and confuses the client, which sees one device service, not two.
+
 ## The recommendation
 
 Two ways to reach Profile T, and they are not equally expensive.
@@ -526,6 +586,59 @@ The provider API needs a credential, and that is the one operational cost of thi
 ```sh
 export CF_Token="..."
 export CF_Account_ID="..."
+```
+
+### Choosing the provider
+
+`acme.sh` supports 205 DNS providers, and the camera should not hardcode one. The choice is in the image as a script:
+
+```
+external/buildroot/board/cvitek/CV181X/overlay/usr/bin/acme-provider
+```
+
+```
+acme-provider menu              choose the provider from a list
+acme-provider list             list the supported DNS providers
+acme-provider set <code>       choose the DNS provider
+acme-provider creds <code>     set the credentials of a provider
+acme-provider show             show the stored configuration
+```
+
+`menu` is the interactive one. It uses `dialog`, which is a Buildroot package and LGPL-2.1, and it shows all 205 providers with the current one marked:
+
+```
+$ acme-provider menu
+╔══════════════════════ ACME DNS provider ══════════════════════╗
+║ Choose the DNS provider for the DNS-01 challenge.              ║
+║                                                               ║
+║ The asterisk marks the current one.                            ║
+║ The credentials are set afterwards with                        ║
+║ 'acme-provider creds <code>'.                                  ║
+╟───────────────────────────────────────────────────────────────╢
+║  1984Hosting (1984hosting)                                    ║
+║  Alibaba Cloud (ali)                                          ║
+║  AWS Route 53 (aws)                                           ║
+║  Cloudflare (cf) *                                            ║
+║  DigitalOcean (dp)                                            ║
+║  Hetzner Cloud (hetznercloud)                                 ║
+║  ...                                                          ║
+╚═══════════════════════════════════════════════════════════════╝
+```
+
+The codes are the file names in acme.sh's `dnsapi` directory, so `cf` is Cloudflare and `aws` is Route 53. The provider and the credentials go into `/etc/acme.sh/provider.conf`, and `acme.sh` reads them from there.
+
+`creds` prints the environment variables that the chosen provider reads, taken from the header of its own script in acme.sh:
+
+```
+$ acme-provider creds cf
+The usual ones are:
+
+  CF_Token      an API token with permission to edit the DNS zone
+  CF_Account_ID the account id, if the token is scoped to an account
+
+Put them in /etc/acme.sh/provider.conf, one per line, for example:
+
+  CF_Token='...'
 ```
 
 ### The HTTP-01 alternative, and why it is not the way

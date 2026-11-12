@@ -26,10 +26,10 @@ These are decided. The steps below carry them inline with a `**Decision:**` mark
 | Question | Decision | Step |
 |---|---|---|
 | OTA update | yes, with the automatic polling removed | 5.2 |
-| Gimbal | no | 7.10, dropped |
-| PTZ | no, it comes with the gimbal | 7.10, dropped |
+| Gimbal | no | 7.11, dropped |
+| PTZ | no, it comes with the gimbal | 7.11, dropped |
 | Sensor | GC2053 | 3.9 |
-| Snapshot | yes | 7.10 |
+| Snapshot | yes | 7.11 |
 | WiFi | no | 3.3 |
 | HaLow | no | 3.3 |
 | Battery | no, the camera is powered over PoE | 3.3, 5.4 |
@@ -864,10 +864,20 @@ The details, including the full comparison, the TLS setup and the ACME certifica
 | Goal | The camera serves a certificate the client trusts, without a port open on the router. |
 | Change | `acme.sh` with a DNS-01 challenge, a renewal hook and the reload of lighttpd. |
 | Check | The certificate renews and lighttpd picks up the new one without a restart. |
-| Detail | `acme.sh` is POSIX shell and needs `curl`, `openssl` and a POSIX shell, all three are in the image. It has 206 DNS providers, among them Cloudflare, AWS Route 53, Alibaba Cloud, DigitalOcean and Hetzner. `lego` is not an option, it is a Go binary and there is no riscv64 release. |
+| Detail | `acme.sh` is POSIX shell and needs `curl`, `openssl` and a POSIX shell, all three are in the image. It has 205 DNS providers, among them Cloudflare, AWS Route 53, Alibaba Cloud, DigitalOcean and Hetzner. `lego` is not an option, it is a Go binary and there is no riscv64 release. |
 | Note | The provider API needs a credential. The certificate and the key go into the overlay filesystem, not into the image. HTTP-01 is the alternative but it needs a port 80 forward on the router, and BusyBox httpd is not enabled in this image anyway. |
 
-### Step 7.8: The SOAP endpoint
+### Step 7.8: The provider selection
+
+| | |
+|---|---|
+| Goal | The user picks the DNS provider of their domain from a list, not from a hardcoded name. |
+| Change | The script `acme-provider` in the overlay, with all 205 providers and an interactive `dialog` menu. The `dialog` package is enabled in the Buildroot config. |
+| Check | `acme-provider menu` opens the list, `acme-provider set cf` stores the choice, and `acme-provider show` prints it back. |
+| Detail | The codes are the file names in acme.sh's `dnsapi` directory. The credentials go into `/etc/acme.sh/provider.conf`, and `acme-provider creds <code>` prints the variables that the chosen provider reads. |
+| Note | Cloudflare is the first test, because an API token with permission to edit the DNS zone is the simplest credential of all 205. |
+
+### Step 7.9: The SOAP endpoint
 
 | | |
 |---|---|
@@ -876,7 +886,7 @@ The details, including the full comparison, the TLS setup and the ACME certifica
 | Check | `https://<ip>/onvif/device_service` answers with a device description, and `GetProfiles` returns both streams with the `tr2` namespace. |
 | Note | The port is the vendor default, 8899. It does not collide with anything in the image. |
 
-### Step 7.9: Web services discovery
+### Step 7.10: Web services discovery
 
 | | |
 |---|---|
@@ -885,7 +895,7 @@ The details, including the full comparison, the TLS setup and the ACME certifica
 | Check | The process is running and listening. A client that scans finds the camera. |
 | Note | Without this the camera only shows up when the address is entered by hand. The vendor port is 3702, the ONVIF standard default is 3700. Both are used in the field, the vendor one works with the NVRs that were tested. |
 
-### Step 7.10: Snapshot
+### Step 7.11: Snapshot
 
 | | |
 |---|---|
