@@ -3,6 +3,9 @@
 Every step has a goal, a concrete change and a way to check the result.
 The check is always a build, never the camera.
 
+The submodule review in [submodule-review.md](./submodule-review.md) is the
+evidence for the decisions below.
+
 ## Baseline
 
 Build the upstream image first. Everything after that is compared against it.
@@ -32,6 +35,7 @@ Unpack the rootfs of the built image and list what is in it.
 | Change | None, just a script that lists the packages. |
 | Check | The list is stored next to the build output. |
 | Note | This list is the checklist for the trimming steps later. |
+
 
 ## Step 1: Understand what is actually needed
 
@@ -151,7 +155,36 @@ the BCM firmware at boot, which is the part that goes.
 | Change | Keep `ntp` and `ntpd`. |
 | Check | NTP is in the inventory and the init script starts it. |
 
-### Step 3.6: Keep the ISP tuning
+### Step 3.6: Drop FreeRTOS
+
+| | |
+|---|---|
+| Goal | One core, one OS. The RTOS on the second core has no user. |
+| Change | In the defconfig: `CONFIG_ENABLE_FREERTOS=n`, `CONFIG_ENABLE_RTOS_DUMP_PRINT=n`. Remove `cv181x_rtos_cmdqu.ko` from the module list. |
+| Check | The inventory has no FreeRTOS. The build log has no RTOS target. |
+| Note | The FreeRTOS forks are two years behind upstream. Dropping them also removes the oldest code in the image. |
+| Question | Does anything on the Linux side talk to the RTOS core? If yes, this step needs more work. |
+
+### Step 3.7: Build live555 from source
+
+| | |
+|---|---|
+| Goal | No prebuilt binaries in the image. |
+| Change | Enable `BR2_PACKAGE_LIVE555` in the minimal external tree. Point the `cvi_rtsp` build at the result instead of the tarball. |
+| Check | The image contains the live555 libraries and they were built from the Buildroot package, not copied from `oss/`. |
+| Note | `cvi_rtsp/build.sh` only downloads the tarball when `LIVE555_DIR` is empty. Set it and the download never happens. The Buildroot package is version 2025.10.13, LGPL-3.0, with a checked hash. |
+| Risk | The include and library paths have to line up. If they do not, the `cvi_rtsp` build fails with a missing header. That is a build failure, not a silent problem. |
+
+### Step 3.8: Drop the TPU stack
+
+| | |
+|---|---|
+| Goal | No AI accelerator in a camera image. |
+| Change | Remove `cviruntime`, `cvikernel`, `cvimath`, `cvibuilder`, `cnpy`, `tdl_sdk`, `flatbuffers` from the build. Remove `cv181x_tpu.ko` from the module list. |
+| Check | The inventory has no TPU libraries. The image is smaller. |
+| Note | `ive` stays, it is the image processing engine and not the AI one. |
+
+### Step 3.9: Keep the ISP tuning
 
 | | |
 |---|---|
@@ -265,3 +298,8 @@ ends in a build that has to succeed.
 - Which sensor to target: OV5647, GC2053 or SC530AI? The defconfig enables all
   three.
 - ONVIF: existing server or own implementation?
+- Does the Linux side talk to the FreeRTOS core? If yes, dropping the RTOS is
+  not as simple as turning off three config options.
+- Does the minimal image need openssl at all? Buildroot 2021.05 is end of life
+  and the openssl in it has known CVEs. Without a TLS use case it can go.
+

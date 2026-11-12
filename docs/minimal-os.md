@@ -28,20 +28,26 @@ these places.
 
 | Part | Source | Why it stays |
 |---|---|---|
-| Kernel | `linux_5.10` (Sophgo fork) | 5.10.4 with the CVI clock, dma, pinctrl, fbdev, sound and wifi/bt pin trees. The camera does not work without it. |
-| Bootloader | `u-boot-2021.10`, `fsbl`, `opensbi` | Boot chain of the SoC. |
-| SDK | `osdrv`, `cviruntime`, `cvibuilder`, `cvikernel`, `cvimath`, `ive`, `cvi_mpi` | The video pipeline, the ISP and the encoder. All source, no blobs. |
+| Kernel | `linux_5.10` (Sophgo fork) | Genuine upstream Linux 5.10.4 with one vendor porting commit on top. The camera drivers are not in the kernel at all, they live out of tree in `osdrv` and are written against the 5.10 API. See [submodule-review.md](./submodule-review.md). |
+| Bootloader | `u-boot-2021.10`, `fsbl`, `opensbi` | Boot chain of the SoC. All three are upstream with a small vendor delta. |
+| SDK | `osdrv`, `cvibuilder`, `cvikernel`, `cvimath`, `ive`, `cvi_mpi` | The video pipeline, the ISP and the encoder. All source, no blobs. |
 | RTSP | `cvi_rtsp` | The RTSP server. Source. |
 | Init | `ramdisk` overlay | The overlayfs setup on the userdata partition. |
 
 None of these are patches on top of upstream Linux. They are the vendor tree, and
 they cannot be removed without losing the camera.
 
+The kernel is not old because nobody cares. The camera drivers in `osdrv` use
+`class_create(THIS_MODULE, name)`, which was removed in kernel 6.4, and the
+version guards in the sources stop at 5.10. A newer kernel exists for the SoC,
+but not for the camera.
+
+
 ### Parts that go
 
 | Part | What it is | Why it goes |
 |---|---|---|
-| `reCamera` package | Downloads a prebuilt `reCamera.zip` from `sscma-example-sg200x` and copies its install tree into the target | A binary blob of unknown content. This is the main thing to get rid of. |
+| `reCamera` package | Downloads a prebuilt `reCamera.zip` from `sscma-example-sg200x` and copies its install tree into the target | A binary blob of unknown content. The source branch no longer exists upstream, the package is already broken. |
 | `sscma-supervisor` | The REST API on port 80, built with libhv | Only needed for the web UI and the device manager. It also ships its own rootfs and starts the broker. |
 | `sscma-node` | Wraps the TPU inference, pulls in host-nodejs and node-red | Only needed for the AI features. |
 | `node-red` + dashboard | The flow editor and dashboard | Not wanted in a minimal image. |
@@ -49,6 +55,10 @@ they cannot be removed without losing the camera.
 | `avahi`, `dnsmasq`, `ttyd` | mDNS, DNS and the web terminal | Not needed. |
 | `bt-init`, `bluez5_utils` | Bluetooth init for the BCM chip | See below. |
 | `opencv4`, `opencv4-contrib` | Only used by the sscma stack | Goes with it. |
+| FreeRTOS stack | `freertos`, `FreeRTOS-Kernel`, `Lab-Project-FreeRTOS-POSIX` | Runs on the second core, nothing uses it. The forks are two years behind upstream. |
+| TPU stack | `cviruntime`, `cvikernel`, `cvimath`, `cvibuilder`, `cnpy`, `tdl_sdk`, `flatbuffers` | The AI accelerator SDK. A camera does not need it. |
+| `live555.tar.gz` blob | Prebuilt live555 binaries | Live555 is LGPL-3.0 and Buildroot has a package for it. Build from source. |
+
 
 ### Bluetooth: a hardware question
 
@@ -81,6 +91,38 @@ The overlay sets up the writable root: `/bin`, `/etc`, `/home`, `/lib`, `/opt`,
 in the read only rootfs and the upper layer in the userdata partition. That is
 also where the factory reset and the OTA update live.
 
+## The kernel
+
+The kernel is `sophgo/linux_5.10`. It is worth being precise about what that
+means, because the vendor tree is not the same thing as a kernel with unknown
+additions.
+
+The history of the `sg200x-dev` branch:
+
+```
+b1313fe517  2020-12-30  Greg Kroah-Hartman   Linux 5.10.4
+b4ca5efcaf  2024-02-14  sophgo-forum-service linux porting cvitek asic chips.
+72ef337123  2024-02-14  sophgo-forum-service [fea] Init sg200x-dev branch.
+```
+
+Everything below the first entry is upstream Linux by the upstream authors.
+Above it there are two Sophgo commits and then weekly stable releases.
+
+The porting commit adds the CV181X device trees and the clock, DMA, pinctrl and
+sound drivers. The changes to `arch/riscv/` are backports from upstream v5.12 and
+v5.15, verified by diffing against the upstream releases.
+
+The camera drivers are not in the kernel. They are in `osdrv/interdrv/` and get
+built as out of tree modules. That is also why the kernel stays at 5.10: the
+drivers use the two argument `class_create()`, which was removed in kernel 6.4,
+and the version guards in the sources stop at 5.10.
+
+A newer kernel exists for the SoC. `sophgo/linux-riscv` is at 6.18 and has the
+SG2002 support. But it has the clock, plic, sdhci and pinctrl, and no CVI video
+drivers. Mainline has the same. There is no newer kernel with this camera in it.
+
+The full evidence is in [submodule-review.md](./submodule-review.md).
+
 ## Build
 
 ```bash
@@ -88,3 +130,4 @@ also where the factory reset and the OTA update live.
 ```
 
 Output lands in `output/sg2002_recamera_minimal/install/soc_sg2002_recamera_minimal/`.
+
