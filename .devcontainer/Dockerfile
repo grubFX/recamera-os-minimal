@@ -45,6 +45,7 @@ RUN apt update && export DEBIAN_FRONTEND=noninteractive \
     bc \
     squashfs-tools \
     android-sdk-libsparse-utils \
+    e2fsprogs \
     jq \
     cmake \
     tclsh \
@@ -80,6 +81,17 @@ RUN apt update && export DEBIAN_FRONTEND=noninteractive \
     xz-utils \
     file \
  && ln -sf /usr/bin/python3 /usr/local/bin/python || true
+
+# The prebuilt make_ext4fs in build/tools/common/prebuild needs libpcre.so.3
+# (PCRE1). Debian 13 dropped PCRE1 from the archive, so the library is taken
+# from the Debian package pool. Without it the "data" partition cannot be
+# packed.
+ARG PCRE3_DEB="http://ftp.debian.org/debian/pool/main/p/pcre3/libpcre3_8.39-15_amd64.deb"
+RUN if ! [ -e /usr/lib/x86_64-linux-gnu/libpcre.so.3 ]; then \
+        curl -fsSL -o /tmp/libpcre3.deb "${PCRE3_DEB}" \
+        && dpkg -i /tmp/libpcre3.deb \
+        && rm -f /tmp/libpcre3.deb; \
+    fi
 
 # The riscv64 musl toolchain from the riscv-collab project is not needed any
 # more. It was there for the cross-compiled Node.js: Node.js 24 and later
