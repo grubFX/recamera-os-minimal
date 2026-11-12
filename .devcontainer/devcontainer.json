@@ -26,18 +26,10 @@
     // host-tools/gcc/riscv64-linux-musl-x86_64 and is selected by
     // external/setenv.sh through CROSS_COMPILE_PATH_MUSL_RISCV64.
     //
-    // The riscv-collab toolchain for the cross-compiled Node.js is already in
-    // the image, at /opt/toolchains/riscv64-musl. The swap of the cvitec
-    // sysroot runtime libraries happens in the build, see
-    // external/scripts/setup-node26-toolchain.sh.
-    //
     // The clone is shallow on purpose. The full history of the Linux
     // submodule is several gigabytes and the build does not need it.
     "postCreateCommand": "git submodule update --init --recursive --depth 1",
     "remoteUser": "vscode",
-    "containerEnv": {
-        "TC_ROOT": "/opt/toolchains/riscv64-musl"
-    },
     // The build runs in the container and writes to output/ in the
     // workspace, which is the host's directory. The container stays up while
     // the build runs, so the build is not killed by a terminal that closes.

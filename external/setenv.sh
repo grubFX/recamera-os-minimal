@@ -130,14 +130,36 @@ rsync_dir $EXTERNAL/buildroot/ $BUILDROOT_DIR/
 # The Buildroot submodule carries local-only fixes that cannot be pushed
 # upstream, ship them as patches here instead. The patch is applied in the
 # output, after the submodule was copied there.
+# A patch that deletes a file which is already gone is not an error: the
+# file was removed in an earlier run and the output still has the hole.
+# patch reports that as a failure, so the exit code is checked against the
+# output, not against the exit code of patch.
 pushd "$PROJECT_OUT/$BUILDROOT_DIR"
 for patch in "$EXTERNAL/buildroot/patches"/*.patch; do
     [ -f "$patch" ] || continue
     echo "Applying buildroot patch: $(basename "$patch")"
-    patch -p1 --forward < "$patch" || {
+    patch -p1 --forward < "$patch" | sed 's/^/    /'
+    if patch -p1 --forward --dry-run < "$patch" >/dev/null 2>&1; then
+        continue
+    fi
+    # The patch did not apply cleanly. Check whether everything in it is
+    # already there: a file that the patch deletes does not exist any more.
+    missing=0
+    while read -r deleted; do
+        [ -n "$deleted" ] || continue
+        if [ -e "$deleted" ]; then
+            echo "Error: Failed to apply $patch, $deleted is still there"
+            missing=1
+        fi
+    done < <(awk '
+        /^diff --git/ { file = $4; sub(/^b\//, "", file); next }
+        /^deleted file mode/ { print file }
+    ' "$patch")
+    if [ "$missing" != 0 ]; then
         echo "Error: Failed to apply $patch"
         exit 1
-    }
+    fi
+    echo "    (already applied)"
 done
 popd
 

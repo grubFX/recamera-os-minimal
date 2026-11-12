@@ -101,10 +101,9 @@ The CI stays the reference, but a local build is now possible in the devcontaine
 | Missing | What it does | Where it comes from |
 |---|---|---|
 | The cvitec riscv64 musl toolchain | The cross compiler for the target | The `host-tools` submodule, cloned by the `postCreateCommand` |
-| The riscv-collab toolchain | The C++20 compiler for the cross-compiled Node.js | Downloaded into the image at `/opt/toolchains/riscv64-musl` |
 | `xz-utils` | To unpack the toolchain | A package in the image |
 
-The base image is **Debian 13 (trixie)**. The reason is the riscv-collab toolchain: it is a normal x86-64 glibc program and it links against `GLIBC_2.38`. Debian 12 has glibc 2.36 and would not run it, Debian 13 has glibc 2.41.
+The base image is **Debian 13 (trixie)**. The packages are cross-compiled, but the host tools that Buildroot builds itself are compiled against the host libc. util-linux 2.41.3 and fakeroot 1.37.2 need a current glibc: Debian 12 has glibc 2.36 and does not build them, Debian 13 has glibc 2.41.
 
 ```
 $ docker run --rm buildpack-deps:trixie-curl ldd --version | head -1

@@ -41,13 +41,13 @@ Troubleshooting:
 
 ### 2.2 Build in Dev Containers
 
-The devcontainer is the local build path. It carries the riscv-collab toolchain that the cross-compiled Node.js needs, and it clones the `host-tools` submodule with the cvitec cross compiler.
+The devcontainer is the local build path. It clones the `host-tools` submodule with the cvitec cross compiler.
 
 ```bash
 code --folder . --dev-container
 ```
 
-The base image is Debian 13 (trixie). The riscv-collab toolchain is a normal x86-64 glibc program and links against `GLIBC_2.38`, so it needs a newer glibc than Debian 12 has.
+The base image is Debian 13 (trixie). The packages are cross-compiled, but the host tools that Buildroot builds itself are compiled against the host libc. util-linux 2.41.3 and fakeroot 1.37.2 need a current glibc, Debian 12 with glibc 2.36 does not build them.
 
 Please refer to [Dev Containers](https://marketplace.visualstudio.com/items?itemName=ms-vscode-remote.remote-containers) for more details.
 
