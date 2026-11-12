@@ -84,44 +84,99 @@ Camera, RTSP, ONVIF, SSH, WiFi, NTP.
 
 **Status: open.** This is what the plan is for.
 
-## 6. ONVIF, without a SOAP stack
+## 6. ONVIF Profile T, over HTTPS, with H.265
 
-The camera has to be discoverable and controllable from a standard ONVIF client. Without pulling a SOAP stack into the image.
+The camera has to be discoverable and controllable from a standard ONVIF client. It has to be **Profile T**, and that means HTTPS and H.265 are not optional.
 
-**Status: open, approach decided, implementation found.**
+**Status: open, approach decided, one open question.**
 
-The vendor stack already has an ONVIF implementation. It is in the public Apache-2.0 repository `Seeed-Studio/sscma-example-sg200x`, in the directory `solutions/sscma-node/main/node/onvif/`, 1267 lines across 8 files. The CHANGELOG entry for 0.2.5 records it as a shipped feature.
+Profile T is built on ONVIF Media 2. The vendor implementation in `Seeed-Studio/sscma-example-sg200x`, `solutions/sscma-node/main/node/onvif/`, is a **Profile S** device: the SOAP envelope uses the `ver10` namespaces and the `trt` prefix, there is no `tr2` and no `ver20` in the code, the service URL is plain `http://`, and the password is accepted as plaintext. Profile S is being deprecated, the last date for conformance submissions is 31 March 2027.
 
-```
-GetProfiles            GetStreamUri             GetCapabilities
-GetDeviceInformation   GetServices              GetSystemDateAndTime
-GetVideoEncoderConfiguration
-GetGuaranteedNumberOfVideoEncoderInstances
-GetHostname            GetUsers                 GetEndpointReference
-```
+The open source candidates were checked on the source, not on the README:
 
-The dependency situation is the reason to prefer it:
+| | Vendor implementation | `onvif_simple_server` | `onvif_srvd` |
+|---|---|---|---|
+| License | Apache-2.0 | GPL-3.0 | GPL-2.0 |
+| Media service | Media 1 | **Media 1 and Media 2** | Media 1 |
+| Imaging service | no | **yes** | no |
+| Event service | no | **yes** | no |
+| H.265 in the profile list | no | **yes, for Media 2** | no |
+| HTTPS | no | via lighttpd | via gSOAP |
+| Tested against real NVRs | **yes** | no | no |
 
-| Need | Vendor implementation | `onvif_simple_server` |
-|---|---|---|
-| HTTP server | libhv, already in the image | BusyBox httpd, already in the image |
-| Crypto | OpenSSL, already in the image | libtomcrypt, new |
-| XML | hand written scanner | ezxml |
-| SOAP stack | none | none |
+`onvif_simple_server` is the only one of the three that has the Profile T services. It has `media2_service.c` with the `ver20/media/wsdl` namespace, `imaging_service.c`, `events_service.c`, and it renders H.265 for Media 2. Its TLS gap is not a gap in the ONVIF code: it is a CGI program that runs behind a web server, and lighttpd 1.4.59 is already in the Buildroot tree with `BR2_PACKAGE_LIGHTTPD_OPENSSL`.
 
-No new dependency in the image, and the implementation was tested against real NVRs, including the fix for a truncated `GetCapabilities` response that Hikvision NVRs read as invalid XML.
+**The open question is the license.** GPL-3.0 for the image is a distribution decision for the maintainer, not a technical obstacle. The alternative, porting the Media 2 service into the Apache-2.0 vendor code, is an independent implementation and not a port.
 
-**It is a Profile S implementation, not Profile T.** The SOAP envelope uses the `ver10` namespaces and the `trt` prefix, which is ONVIF Media 1, the specification behind Profile S. There is no `tr2` and no `ver20` anywhere in the code. Profile S is being deprecated, the last date for conformance submissions is 31 March 2027.
+The work is then: the Media 2 service, the TLS termination, the H.265 SDP patch for `cvi_rtsp`, and the certificate.
 
-The consequence for the requirement: the camera is discoverable and streams, which is what the requirement asks for. It is not conformant, and it is not Profile T. Moving it to Media 2 is a separate project.
-
-The work is the extraction. The code is compiled into `sscma-node`, the Node-RED node binary, and it has to become a standalone daemon. The vendor coupling is four symbols: `ma::Mutex`, `ma::Guard`, `ma_err_t` and `PROJECT_VERSION`.
-
-The details, including what is missing for conformance, are in [onvif.md](./onvif.md).
+The details, including the full comparison, the TLS setup and the ACME certificate options, are in [onvif.md](./onvif.md).
 
 ## 7. No known CVE in the network facing packages
 
 The image is reachable from the network. Dropbear, busybox and openssl have to be on versions without known vulnerabilities. **Status: open.** Buildroot 2021.05 is end of life, its upstream branch stopped in June 2021. The newer Buildroot in the same Sophgo repo has no CV181X support, so the fix is to bump the single package in the fork, not to move the tree. Plan step 4.
+
+### CVE-2026-123158 hits this image
+
+**This image is affected.** The conditions in the advisory are all met:
+
+| Condition | This image |
+|---|---|
+| OpenSSH before 10.6p2 | **8.6p1**, `external/buildroot/package/openssh/openssh.mk` |
+| musl libc | yes, `BR2_TOOLCHAIN_EXTERNAL_CUSTOM_MUSL=y` |
+| PAM disabled | yes, `BR2_PACKAGE_LINUX_PAM` is not set |
+
+The consequence, from the CVE record:
+
+> For some configurations of accounts, any password between 256 and 1024 characters succeeds.
+
+That is a remote, unauthenticated authentication bypass. The advisory is in the CISA Known Exploited Vulnerabilities catalog, and there is a public exploit repository for it.
+
+The root cause is outside sshd, in the musl side of the crypt handling: a password that is long enough is misread as a hash. The OpenSSH team wrote the workaround in sshd, and it shipped in 10.6p2.
+
+**The mitigation is the upgrade to 10.6p2.** The upstream Buildroot is already there:
+
+```
+# buildroot master, package/openssh/openssh.mk
+OPENSSH_VERSION_MAJOR = 10.6
+OPENSSH_VERSION_MINOR = p2
+```
+
+The hash is verified. The release notes publish the SHA256 in base64, and the tarball matches it:
+
+```
+$ sha256sum openssh-10.6p2.tar.gz
+9ae44872090cf2f06b3cf9ff147e7f16f309671340763ed2f99248398ae29d5b
+
+$ echo "muRIcgkM8vBrPPn/FH5/FvMJZxNAdj7S+ZJIOYrinVs=" | base64 -d | xxd -p
+9ae44872090cf2f06b3cf9ff147e7f16f309671340763ed2f99248398ae29d5b
+```
+
+There is a second mitigation, and it is worth doing regardless of the version: **the camera does not need password authentication at all.** The overlay ships `PermitRootLogin yes` with the password authentication lines commented out, which means the default is "yes" for both:
+
+```
+external/buildroot/board/cvitek/CV181X/overlay/etc/ssh/sshd_config
+32:PermitRootLogin yes
+57:#PasswordAuthentication yes
+58:#PermitEmptyPasswords no
+```
+
+Root itself is not reachable, the Buildroot config takes the root password away and disables the root login:
+
+```
+external/buildroot/configs/cvitek_CV181X_musl_riscv64_defconfig
+205:BR2_TARGET_ENABLE_ROOT_LOGIN=n
+206:BR2_TARGET_GENERIC_ROOT_PASSWD=""
+```
+
+The user account in the image is `recamera`, with no password set:
+
+```
+external/buildroot/board/cvitek/CV181X/users_table.txt
+recamera  -1  recamera  -1  =recamera  /home/recamera  /bin/sh  i2c,spi,led,gpio,input,dialout,audio
+```
+
+The `-1` in the password column means "no password". With the CVE, a 256 to 1024 character password would have been accepted for that account. A camera on a PoE network that is reachable from the internet with password authentication enabled is the exact scenario of the CVE. Turning the password authentication off and using key authentication removes the attack surface entirely, and it is one line in `sshd_config`.
 
 ## 8. Everything is committed and pushed
 

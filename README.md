@@ -166,7 +166,7 @@ The plan is in [docs/plan.md](./docs/plan.md). The decisions and the evidence be
 | [requirements.md](./docs/requirements.md) | The eight hard requirements and their status. |
 | [minimal-os.md](./docs/minimal-os.md) | What stays in the image and what goes, and why. |
 | [submodule-review.md](./docs/submodule-review.md) | All 25 submodules, checked for forks, blobs and hidden code. |
-| [onvif.md](./docs/onvif.md) | The ONVIF decision and how the implementation is extracted. |
+| [onvif.md](./docs/onvif.md) | The ONVIF Profile T decision: the three candidate implementations compared, the TLS setup and the certificate options. |
 | [kernel-upgrade.md](./docs/kernel-upgrade.md) | What a port to a newer kernel would cost. |
 
 ### Building the minimal target

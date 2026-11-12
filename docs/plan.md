@@ -26,14 +26,16 @@ These are decided. The steps below carry them inline with a `**Decision:**` mark
 | Question | Decision | Step |
 |---|---|---|
 | OTA update | yes, with the automatic polling removed | 5.2 |
-| Gimbal | no | 7.9, dropped |
-| PTZ | no, it comes with the gimbal | 7.9, dropped |
+| Gimbal | no | 7.10, dropped |
+| PTZ | no, it comes with the gimbal | 7.10, dropped |
 | Sensor | GC2053 | 3.9 |
-| Snapshot | yes | 7.8 |
+| Snapshot | yes | 7.10 |
 | WiFi | no | 3.3 |
 | HaLow | no | 3.3 |
 | Battery | no, the camera is powered over PoE | 3.3, 5.4 |
 | ONVIF events | no, without the AI stack there is no motion detection | 7, not in scope |
+| ONVIF profile | **T**, which means HTTPS and H.265 | 7 |
+| SSH password authentication | no, key authentication only | 4.4 |
 
 The Docker daemon does not matter, the build goes through CI. The ONVIF port is 8899, the vendor default, and it does not collide with anything. The crypto library for ONVIF is OpenSSL, which is already in the image.
 
@@ -503,6 +505,59 @@ Buildroot 2021.05 is end of life, the upstream branch stopped in June 2021. The 
 | Change | If a version is too old, bump that one package in the Buildroot fork. A newer Buildroot is not an option, the `buildroot-2023.11` branch in the same repo has no CV181X support. |
 | Check | The new version is in the image and the build still works. |
 
+### Step 4.3: OpenSSH, and CVE-2026-123158
+
+**This is not a routine bump. This image is affected by an actively exploited authentication bypass.**
+
+The conditions in the advisory are all met:
+
+| Condition | This image |
+|---|---|
+| OpenSSH before 10.6p2 | **8.6p1** |
+| musl libc | yes, `BR2_TOOLCHAIN_EXTERNAL_CUSTOM_MUSL=y` |
+| PAM disabled | yes, `BR2_PACKAGE_LINUX_PAM` is not set |
+
+The consequence, from the CVE record:
+
+> For some configurations of accounts, any password between 256 and 1024 characters succeeds.
+
+Remote, unauthenticated, and in the CISA Known Exploited Vulnerabilities catalog since 9 November 2026.
+
+| | |
+|---|---|
+| Goal | The SSH server is on a version without the authentication bypass. |
+| Change | The `openssh` package in `external/buildroot/package/openssh/` goes from 8.6p1 to 10.6p2. The upstream Buildroot is already there, so the `.mk` file is taken from upstream master and adapted to Buildroot 2021.05. |
+| Check | The image has `sshd -V` reporting 10.6p2, and the build log has no configure error. |
+| Hash | `sha256 9ae44872090cf2f06b3cf9ff147e7f16f309671340763ed2f99248398ae29d5b  openssh-10.6p2.tar.gz` |
+| Note | The tarball hash is verified against the SHA256 that the release notes publish in base64. |
+
+The upstream Buildroot 10.6p2 package needs three things that Buildroot 2021.05 does not have, and they have to be adapted:
+
+| Upstream dependency | Status in 2021.05 | What to do |
+|---|---|---|
+| `BR2_PACKAGE_SYSTEMD_SYSUSERS` | missing | Use the `OPENSSH_USERS` fallback that is already in the 2021.05 package |
+| `BR2_TOOLCHAIN_HAS_GCC_BUG_110934` | missing | Drop the condition, the bug is a GCC 14 issue and this toolchain is GCC 10.2 |
+| `BR2_PACKAGE_LIBSELINUX` | missing | Drop the condition, SELinux is not in this image |
+
+The server binaries also changed. OpenSSH 10.0 split the authentication phase out of `sshd-session` into a separate `sshd-auth` binary:
+
+```
+# upstream buildroot, package/openssh/openssh.mk
+$(INSTALL) -D -m 0755 $(@D)/sshd-auth $(TARGET_DIR)/usr/libexec/sshd-auth
+```
+
+That binary has to be installed too, otherwise the server does not start.
+
+### Step 4.4: Turn off the password authentication
+
+| | |
+|---|---|
+| Goal | The camera is not reachable with a password, only with a key. |
+| Change | In `external/buildroot/board/cvitek/CV181X/overlay/etc/ssh/sshd_config`, set `PasswordAuthentication no` and `PermitEmptyPasswords no`. |
+| Check | `ssh -o PreferredAuthentications=password` fails, and key authentication works. |
+| Detail | The overlay currently ships `PermitRootLogin yes` with the password lines commented out, which means the default is "yes" for both. Root itself is not reachable, the Buildroot config sets `BR2_TARGET_ENABLE_ROOT_LOGIN=n`, but the `recamera` user has no password. |
+| Note | This is the mitigation that removes the attack surface, independent of the version. A camera on a PoE network that is reachable from the internet should not have password authentication on at all. |
+
 ## Step 5: Trim the boot overlay
 
 The overlay sets up the writable root. Some of its parts belong to the app layer. Two places hold the init scripts:
@@ -695,77 +750,109 @@ So the minimal image needs `BUILD_EXAMPLE=1`, or a new buildroot package that bu
 | Change | None. |
 | Check | The init script passes `sh -n`. The config file is valid JSON. The binaries in the image are the ones the build produced. |
 
-## Step 7: ONVIF
+## Step 7: ONVIF Profile T
 
 ONVIF is a direct goal of the image, not a later idea. The camera speaks RTSP already, ONVIF is the discovery layer on top.
 
-The approach is not to write an ONVIF implementation. The vendor stack already has one, in the public Apache-2.0 repository, 1267 lines across 8 files, and it was tested against real NVRs. It is compiled into `sscma-node`, the Node-RED node binary, so it has to be lifted out into its own daemon.
+**The target is Profile T.** That means HTTPS and H.265, and it means ONVIF Media 2. The vendor implementation in `Seeed-Studio/sscma-example-sg200x` is a Profile S device: `ver10` namespaces, `trt` prefix, plain `http://` service URL, plaintext password accepted. Profile S conformance submissions close on 31 March 2027.
 
-**It is a Profile S implementation.** The SOAP envelope uses the `ver10` namespaces and the `trt` prefix, which is ONVIF Media 1, the specification behind Profile S. Profile T would need Media 2, the `ver20` namespaces and the `tr2` prefix, and there is not one `tr2` in the code. Profile S is being deprecated, the last conformance submission date is 31 March 2027.
+Three implementations were compared on the source, not on the README:
 
-That is the right trade for this image. The camera has to show up in an NVR and stream, and this does that with no new dependency. Profile T is a separate project, the same way a kernel port is.
+| | Vendor implementation | `onvif_simple_server` | `onvif_srvd` |
+|---|---|---|---|
+| License | Apache-2.0 | GPL-3.0 | GPL-2.0 |
+| Media service | Media 1 | **Media 1 and Media 2** | Media 1 |
+| Imaging service | no | **yes** | no |
+| Event service | no | **yes** | no |
+| H.265 in the profile list | no | **yes, for Media 2** | no |
+| HTTPS | no | via lighttpd | via gSOAP |
+| Tested against real NVRs | **yes** | no | no |
 
-The details, including what is missing for Profile S conformance, are in [onvif.md](./onvif.md).
+`onvif_simple_server` is the only one of the three that has the Profile T services. `media2_service.c` uses the `ver20/media/wsdl` namespace, `imaging_service.c` and `events_service.c` exist, and the H.265 code path renders "H265" for Media 2 and "H264" for Media 1.
 
-### Step 7.1: Extract the module
+Its TLS gap is not a gap in the ONVIF code. It is a CGI program that runs behind a web server, and lighttpd 1.4.59 is already in the Buildroot tree with the OpenSSL option.
+
+**The open question is the license.** GPL-3.0 for the image is a distribution decision for the maintainer. The alternative, porting the Media 2 service into the Apache-2.0 vendor code, is an independent implementation of the Media 2 operations, not a port of the existing ones.
+
+The details, including the full comparison, the TLS setup and the ACME certificate options, are in [onvif.md](./onvif.md).
+
+### Step 7.1: The decision
 
 | | |
 |---|---|
-| Goal | The ONVIF code exists as a standalone package, not inside the Node-RED node. |
-| Change | Copy the eight files from `solutions/sscma-node/main/node/onvif/` into a new package `external/br2-external-minimal/onvifd/`. Add a `main.cpp` that reads the configuration, registers the profiles and keeps the service running. |
+| Goal | One implementation is chosen, and the reason is written down. |
+| Change | None, this is the decision step. |
+| Check | The decision is in `docs/onvif.md` and in `docs/requirements.md`. |
+| Note | The default recommendation is `onvif_simple_server` with lighttpd in front of it, because the Profile T services are the hard part and they already exist. The vendor code stays valuable as the field tested reference for the profile mapping. |
+
+### Step 7.2: The package
+
+| | |
+|---|---|
+| Goal | The ONVIF server builds and is in the image. |
+| Change | A new package `external/br2-external-minimal/onvif_simple_server/` with the sources from `roleoroleo/onvif_simple_server`, GPL-3.0. The package selects `BR2_PACKAGE_LIGHTTPD` with `BR2_PACKAGE_LIGHTTPD_OPENSSL`, and `BR2_PACKAGE_CURL` for the certificate renewal. |
 | Check | The package builds. The binary is in the image. |
-| Source | `https://github.com/Seeed-Studio/sscma-example-sg200x`, the `onvif/` directory, Apache-2.0. The license header stays on every file. |
-| Note | The code is copied, not written. The Apache-2.0 license requires the notice to be kept and allows reuse in a proprietary image. |
+| Dependencies | lighttpd with OpenSSL, curl, and one of libtomcrypt, mbedtls or wolfssl for the digest authentication. |
+| Note | lighttpd is in the upstream Buildroot tree at `buildroot-2021.05/package/lighttpd/` and is not in the image yet. The option `BR2_PACKAGE_LIGHTTPD_OPENSSL` selects `BR2_PACKAGE_OPENSSL`. |
 
-### Step 7.2: Drop the vendor dependencies
-
-| | |
-|---|---|
-| Goal | The extracted code does not need the Node-RED framework. |
-| Change | `ma::Mutex` and `ma::Guard` become `std::mutex` and `std::lock_guard`. `ma_err_t` becomes `int`. `PROJECT_VERSION` becomes a string from the build configuration. |
-| Check | The package builds without the `SSCMA-Micro` submodule. No `core/ma_debug.h` include is left. |
-| Detail | `ma_debug.h` is only used for the `MA_LOG*` macros. They map to `ma_printf`. The replacement is a logging macro that writes to stderr, or the BusyBox syslog. |
-| Note | This is the whole vendor coupling. The rest is libhv, OpenSSL and POSIX sockets. |
-
-### Step 7.3: The buildroot package
-
-| | |
-|---|---|
-| Goal | `onvifd` builds and is in the image. |
-| Change | The new package selects `BR2_PACKAGE_LIBHV` and `BR2_PACKAGE_OPENSSL`. libhv is already in the upstream external tree, so the minimal tree gets the same package definition. |
-| Check | The binary is in the image. The build log has no missing dependency. |
-| Dependencies | libhv and OpenSSL. Both are already in the image. Nothing new. |
-| Note | `libhv` in `external/br2-external/libhv/` is version v1.3.3, from `ithewei/libhv`, and it depends on openssl. It also enables MQTT, which the minimal image does not need, but the flag is in the configure line of the existing package. |
-
-### Step 7.4: The configuration file
+### Step 7.3: The configuration file
 
 | | |
 |---|---|
 | Goal | The daemon knows the camera identity and the two streams. |
-| Change | A configuration file with the model, manufacturer, firmware version, serial number, the RTSP port, the RTSP path, the ONVIF port and the credentials. |
+| Change | The `onvif_simple_server.json` with the model, manufacturer, firmware version, serial number, the RTSP port, the RTSP path, the ONVIF port and the credentials. |
 | Check | The daemon starts with it and the SOAP endpoint answers. |
-| Note | The serial number comes from the U-Boot environment, `fw_printenv -n sn`. `uboot-envtools` is already in the image because `libubootenv` is enabled. The vendor code already does this, the extracted code keeps that function. |
+| Note | The serial number comes from the U-Boot environment, `fw_printenv -n sn`. `uboot-envtools` is already in the image because `libubootenv` is enabled. |
 
-### Step 7.5: Two RTSP streams
+### Step 7.4: Two RTSP streams, one of them H.265
 
 | | |
 |---|---|
 | Goal | The camera serves a main and a sub stream, with the names the ONVIF profiles point at. |
-| Change | The `cvi_rtsp` JSON configuration gets two entries. The session names have to match the path in the ONVIF profiles. |
+| Change | The `cvi_rtsp` JSON configuration gets two entries. The session names have to match the path in the ONVIF profiles. The main stream gets `"codec": "265"`. |
 | Check | The JSON parses, and the paths in it match the ONVIF configuration. |
 | Detail | The vendor stream node uses the session name `live` and derives the path as `/` plus the session name. So the ONVIF profile points at `rtsp://<ip>:554/live`. The `cvi_rtsp` configuration has to use the same name. This is the one place where the two sides have to agree. |
 | Note | The chip has `VENC_MAX_CHN_NUM 16`, two channels are plenty. The service library itself supports `SERVICE_CTX_ENTITY_MAX_NUM 2` entities. |
 
-### Step 7.6: The SOAP endpoint
+### Step 7.5: The H.265 SDP
 
 | | |
 |---|---|
-| Goal | The ONVIF endpoint answers. |
-| Change | None, the daemon serves it on the libhv HTTP server. |
-| Check | `http://<ip>:8899/onvif/device_service` answers with a device description, and `GetProfiles` returns both streams. |
+| Goal | A client can start the H.265 decoder from the SDP alone. |
+| Change | The local `cvi_rtsp` patch `0001-emit-H264-sprop-parameter-sets-in-SDP.patch` is extended for H.265. It currently scans the Annex-B stream for SPS and PPS and only for `RTSP_VIDEO_H264`. H.265 needs VPS, SPS and PPS, and the parameter set format is different. |
+| Check | The SDP of the H.265 stream carries the parameter sets, and a client decodes the stream without waiting for the first in-band frame. |
+| Detail | The condition in the patch is `if (rtpSink != NULL && _codec == RTSP_VIDEO_H264)`. The H.265 variant has to look for the three NAL unit types and build the `sprop-vps`, `sprop-sps` and `sprop-pps` parameters. |
+| Note | The encoder side is already there: `PT_H265` in `service/venc_helper.cpp:145`, `RTSP_VIDEO_H265` in `service/api.cpp:691` and `src/cvi_video_smss.hpp:54`, and `CVI_VENC_SetH265Vui` and `CVI_VENC_SetH265Trans` in the encoder driver. |
+
+### Step 7.6: The TLS termination
+
+| | |
+|---|---|
+| Goal | The ONVIF endpoint is reachable over HTTPS. |
+| Change | A lighttpd configuration with `mod_openssl`, the certificate and the key, and a CGI handler that forwards to the ONVIF server on localhost over plain HTTP. |
+| Check | `https://<ip>/onvif/device_service` answers, and `http://<ip>:8899/onvif/device_service` is not reachable from outside the device. |
+| Note | The service URL in the discovery response becomes `https://`, and the WS-Discovery responder has to advertise the `https` scheme. |
+
+### Step 7.7: The certificate
+
+| | |
+|---|---|
+| Goal | The camera serves a certificate the client trusts, without a port open on the router. |
+| Change | `acme.sh` with a DNS-01 challenge, a renewal hook and the reload of lighttpd. |
+| Check | The certificate renews and lighttpd picks up the new one without a restart. |
+| Detail | `acme.sh` is POSIX shell and needs `curl`, `openssl` and a POSIX shell, all three are in the image. It has 206 DNS providers, among them Cloudflare, AWS Route 53, Alibaba Cloud, DigitalOcean and Hetzner. `lego` is not an option, it is a Go binary and there is no riscv64 release. |
+| Note | The provider API needs a credential. The certificate and the key go into the overlay filesystem, not into the image. HTTP-01 is the alternative but it needs a port 80 forward on the router, and BusyBox httpd is not enabled in this image anyway. |
+
+### Step 7.8: The SOAP endpoint
+
+| | |
+|---|---|
+| Goal | The ONVIF endpoint answers with the Media 2 namespaces. |
+| Change | None, the daemon serves it. |
+| Check | `https://<ip>/onvif/device_service` answers with a device description, and `GetProfiles` returns both streams with the `tr2` namespace. |
 | Note | The port is the vendor default, 8899. It does not collide with anything in the image. |
 
-### Step 7.7: Web services discovery
+### Step 7.9: Web services discovery
 
 | | |
 |---|---|
@@ -774,7 +861,7 @@ The details, including what is missing for Profile S conformance, are in [onvif.
 | Check | The process is running and listening. A client that scans finds the camera. |
 | Note | Without this the camera only shows up when the address is entered by hand. The vendor port is 3702, the ONVIF standard default is 3700. Both are used in the field, the vendor one works with the NVRs that were tested. |
 
-### Step 7.8: Snapshot
+### Step 7.10: Snapshot
 
 | | |
 |---|---|
@@ -785,7 +872,7 @@ The details, including what is missing for Profile S conformance, are in [onvif.
 
 **Decision: wanted.** Many clients show a thumbnail in the device list. Without it the entry is blank and the camera looks broken.
 
-PTZ is **out of scope**. The gimbal is a separate product variant with its own base board, and the vendor implementation of ONVIF has no PTZ support anyway. The four PTZ operations and the CAN plumbing are not part of this image.
+PTZ is **out of scope**. The gimbal is a separate product variant with its own base board, and the camera has no PTZ hardware. The PTZ service of `onvif_simple_server` stays unused, as does the `ver20/ptz/wsdl` namespace in `onvif_srvd`.
 
 ## Step 8: Flash and verify
 
@@ -848,10 +935,14 @@ Still open:
 
 - Does the Linux side talk to the FreeRTOS core? `rtos_cmdqu` is used by the region and fast_image parts of the video pipeline. This has to be answered before step 3.6 can drop FreeRTOS.
 - Is a kernel port to 6.4 or 7.x wanted later? It is not a step in this plan, it is its own project. The breakdown is in [kernel-upgrade.md](./kernel-upgrade.md).
+- **Which ONVIF implementation wins?** `onvif_simple_server` is the cheaper path to Profile T, because it already has the Media 2, imaging and event services. It is GPL-3.0, which makes the whole image GPL-3.0. The alternative is an independent implementation of the Media 2 operations on top of the Apache-2.0 vendor code, which is more work but keeps the license. This is a distribution decision, it is not a technical obstacle.
+- **Which DNS provider for the ACME certificate?** The DNS-01 challenge needs an API credential for the DNS provider of the domain. Cloudflare is the simplest case. The camera never has to be reachable from the internet for this.
 
 The ones below are answered by the code and do not need a decision:
 
 - **The Docker daemon.** The build goes through CI, it does not need Docker locally. The workflow builds without a container.
 - **The ONVIF port.** 8899, the vendor default. It does not collide with anything in the image.
-- **The crypto library for ONVIF.** There is no choice to make. The vendor implementation uses OpenSSL for SHA1, and OpenSSL is already in the image. No libtomcrypt, no mbedtls, no wolfssl.
-- **The ONVIF events.** Out of scope. Without the AI stack there is no motion detection, so there is nothing to report.
+- **The crypto library for ONVIF.** OpenSSL, which is already in the image, plus one of libtomcrypt, mbedtls or wolfssl for the digest authentication. `onvif_simple_server` picks one at build time.
+- **The ONVIF events.** Out of scope. Without the AI stack there is no motion detection, so there is nothing to report. The event service of `onvif_simple_server` is there but stays empty.
+- **The TLS termination.** lighttpd, with `mod_openssl`. It is in the upstream Buildroot tree and the CGI interface of `onvif_simple_server` is the standard way to run it behind TLS.
+- **The OpenSSH version.** 10.6p2, the version that fixes CVE-2026-123158. The upstream Buildroot is already there.
