@@ -17,10 +17,19 @@
             "ppa": "false"
         }
     },
-    // Use 'forwardPorts' to make a list of ports inside the container available locally.
-    // "forwardPorts": [],
-    // Use 'postCreateCommand' to run commands after the container is created.
-    // "postCreateCommand": "uname -a",
-    // Set `remoteUser` to `root` to connect as root instead. More info: https://aka.ms/vscode-remote/containers/non-root.
-    "remoteUser": "vscode"
+    // The build needs the cvitec riscv64 musl toolchain from the host-tools
+    // submodule. It is a submodule of this repository, so it is cloned with
+    // the rest of them. The toolchain itself lives in
+    // host-tools/gcc/riscv64-linux-musl-x86_64 and is selected by
+    // external/setenv.sh through CROSS_COMPILE_PATH_MUSL_RISCV64.
+    //
+    // The riscv-collab toolchain for the cross-compiled Node.js is already in
+    // the image, at /opt/toolchains/riscv64-musl. The swap of the cvitec
+    // sysroot runtime libraries happens in the build, see
+    // external/scripts/setup-node26-toolchain.sh.
+    "postCreateCommand": "git submodule update --init --recursive --depth 1 host-tools",
+    "remoteUser": "vscode",
+    "containerEnv": {
+        "TC_ROOT": "/opt/toolchains/riscv64-musl"
+    }
 }
