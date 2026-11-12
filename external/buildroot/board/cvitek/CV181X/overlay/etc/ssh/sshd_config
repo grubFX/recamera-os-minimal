@@ -29,7 +29,7 @@
 # Authentication:
 
 #LoginGraceTime 2m
-PermitRootLogin yes
+PermitRootLogin no
 #StrictModes yes
 #MaxAuthTries 6
 #MaxSessions 10
@@ -54,8 +54,13 @@ AuthorizedKeysFile	.ssh/authorized_keys
 #IgnoreRhosts yes
 
 # To disable tunneled clear text passwords, change to no here!
-#PasswordAuthentication yes
-#PermitEmptyPasswords no
+#
+# The camera uses key authentication only. Password authentication is off
+# because the image ships an account without a password, and because
+# CVE-2026-123158 lets an unauthenticated attacker bypass the password
+# check on musl systems without PAM, which is what this image is.
+PasswordAuthentication no
+PermitEmptyPasswords no
 
 # Change to no to disable s/key passwords
 #ChallengeResponseAuthentication yes
