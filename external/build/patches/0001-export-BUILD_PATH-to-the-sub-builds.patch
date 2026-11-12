@@ -1,0 +1,29 @@
+From: recamera-os <noreply@recamera.local>
+Subject: [PATCH] build: export BUILD_PATH to the sub-builds
+
+The middleware build (cvi_mpi) reads the project configuration from
+$(BUILD_PATH)/.config: mpi_param.mk includes it, and the sensor Makefiles
+only pick up the sensor list from sensor.mk when BUILD_PATH is set in
+the environment. Without the export the sensor build falls back to the
+implicit compile rule, which has no include paths, and the build stops
+with "fatal error: linux/cvi_type.h: No such file or directory".
+
+Generated with diff -u against build as vendored in this repo.
+
+
+--- a/Makefile	2026-11-12 18:48:55.964721689 +0000
++++ b/Makefile	2026-11-12 18:48:55.975902218 +0000
+@@ -33,6 +33,13 @@
+ NPROC := $(shell nproc)
+ export CHIP_ARCH_L := $(shell echo $(CHIP_ARCH) | tr A-Z a-z)
+ export BORAD_FOLDER_PATH := ${BUILD_PATH}/boards/${CHIP_ARCH_L}/${PROJECT_FULLNAME}
++# The middleware build (cvi_mpi) reads the project configuration from
++# $(BUILD_PATH)/.config: mpi_param.mk includes it, and the sensor Makefiles
++# only pick up the sensor list from sensor.mk when BUILD_PATH is set in the
++# environment. Without the export the sensor build falls back to the implicit
++# compile rule, which has no include paths, and the build stops with
++# "fatal error: linux/cvi_type.h: No such file or directory".
++export BUILD_PATH
+ 
+ ifneq ($(origin OUTPUT_DIR),environment)
+     $(error Please execute defconfig/menuconfig/oldconfig first)

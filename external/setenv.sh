@@ -1,5 +1,52 @@
 #!/bin/bash
 
+# The vendor releases turn directories into symlinks (fsbl/plat/cv180x/prebuilt,
+# osdrv/interdrv/*/chip/cv180x, ramdisk/rootfs/public/*, linux/scripts/dtc/...).
+# rsync -a cannot replace an existing directory with a symlink and aborts with
+# "could not make way for new symlink". Removing the offending directories first
+# lets rsync create the symlinks. This only touches paths that are a symlink in
+# the source tree, so build artefacts in the output are left alone.
+function rsync_clear_symlink_conflicts()
+{
+    local src=$1
+    local dst=$2
+    local rel target
+
+    [ -d "$src" ] || return 0
+
+    while IFS= read -r rel; do
+        target="$dst/${rel#./}"
+        # only a real directory in the destination blocks the symlink
+        if [ -d "$target" ] && [ ! -L "$target" ]; then
+            rm -rf "$target"
+        fi
+    done < <(cd "$src" && find . -type l 2>/dev/null)
+}
+
+# The SensorSupportList submodule ships sensor/cv180x, sensor/cv181x and
+# sensor/sg200x as symlinks to sensor/cv182x, and the ISP Makefile does
+# "pushd sensor/$(chip_arch)" with chip_arch=cv181x. The sensor Makefiles
+# resolve their own paths relative to the current directory ("PARAM_FILE=
+# ../../../../../mpi_param.mk"), and a symlink puts the working directory one
+# level deeper than the relative path expects. The result is an empty include
+# path and "fatal error: linux/cvi_type.h: No such file or directory".
+# Materialising the symlink as a real directory keeps the paths working.
+function materialize_sensor_symlinks()
+{
+    local dst=$1
+    local rel target link
+
+    [ -d "$dst/sensor" ] || return 0
+
+    for rel in cv180x cv181x sg200x; do
+        target="$dst/sensor/$rel"
+        [ -L "$target" ] || continue
+        link=$(readlink "$target")
+        rm -f "$target"
+        cp -a "$dst/sensor/$link" "$target"
+    done
+}
+
 function rsync_dir()
 {
     if [ ! -d $1 ]; then
@@ -7,6 +54,23 @@ function rsync_dir()
         return
     fi
     mkdir -p $PROJECT_OUT/$2
+
+    # A trailing slash on the source means "copy the contents", without it
+    # rsync creates <dest>/<basename of src>. The conflict cleanup has to
+    # look at the same place rsync writes to.
+    local base dst
+    base=$(basename "${1%/}")
+    if [ -n "${2%/}" ]; then
+        dst="$PROJECT_OUT/${2%/}"
+    else
+        dst="$PROJECT_OUT"
+    fi
+    case "$1" in
+        */) ;;                       # contents go directly into dst
+        *)  dst="$dst/$base" ;;
+    esac
+    rsync_clear_symlink_conflicts "$1" "$dst"
+
     echo "rsync $1 -> $PROJECT_OUT/$2"; rsync -a --exclude='.git' $1 $PROJECT_OUT/$2 || exit 1
 }
 
@@ -26,7 +90,6 @@ rsync_dir ./ramdisk
 rsync_dir ./osdrv
 rsync_dir ./cvi_mpi
 rsync_dir ./oss
-rsync_dir ./SensorSupportList/ cvi_mpi/component/isp
 rsync_dir ./$BUILDROOT_DIR
 rsync_dir ./cnpy
 rsync_dir ./cvibuilder
@@ -41,14 +104,38 @@ rsync_dir ./cvi_rtsp
 # patch externals
 ###################################
 rsync_dir $EXTERNAL/build .
+# The build submodule carries local-only fixes that cannot be pushed upstream,
+# ship them as patches here instead
+pushd $PROJECT_OUT/build
+for patch in "$EXTERNAL/build/patches"/*.patch; do
+    [ -f "$patch" ] || continue
+    echo "Applying build patch: $(basename "$patch")"
+    patch -p1 --forward < "$patch" || {
+        echo "Error: Failed to apply $patch"
+        exit 1
+    }
+done
+popd
 rsync_dir $EXTERNAL/buildroot/ $BUILDROOT_DIR/
 rsync_dir $EXTERNAL/isp_tuning .
 rsync_dir $EXTERNAL/ramdisk/ ramdisk/
 rsync_dir $EXTERNAL/u-boot/ $UBOOT_DIR/
-rsync_dir $EXTERNAL/linux/drivers/fgh100m/ linux_5.10/drivers/net/wireless/fgh100m/
 
-# driver: sg200x is soft link to cv182x
+# The sensor overlay in $EXTERNAL/SensorSupportList adds the ov5647 driver
+# (5MP mode) and replaces sensor.mk. It has to be copied BEFORE the
+# SensorSupportList submodule: the submodule ships sensor/cv180x, sensor/cv181x
+# and sensor/sg200x as symlinks to sensor/cv182x, and the ISP Makefile does
+# "pushd sensor/$(chip_arch)" with chip_arch=cv181x. An overlay copied on top
+# turns that symlink into a real directory without a Makefile, and the build
+# stops with "No rule to make target 'all'". Copied first, the submodule
+# overwrites the directory with the symlink and the overlay's driver ends up in
+# sensor/cv182x/ov_ov5647, which is what sensor.mk refers to.
+rsync_clear_symlink_conflicts "$EXTERNAL/SensorSupportList" "$PROJECT_OUT/cvi_mpi/component/isp"
 rsync -av $EXTERNAL/SensorSupportList/ $PROJECT_OUT/cvi_mpi/component/isp/
+
+# after the overlay: the submodule wins for the symlinked chip directories
+rsync_dir ./SensorSupportList/ cvi_mpi/component/isp
+materialize_sensor_symlinks "$PROJECT_OUT/cvi_mpi/component/isp"
 
 # patch linux kernel
 # Apply all patches from the external patches directory
@@ -58,8 +145,9 @@ for patch in "$EXTERNAL/linux/patches"/*.patch "$EXTERNAL/linux/patches"/*.diff;
     [ -f "$patch" ] || continue
 
     echo "Applying patch: $(basename "$patch")"
-    # Apply patch with -p1, reading from stdin
-    patch -p1 < "$patch" || {
+    # Apply patch with -p1, reading from stdin. --forward skips a patch that
+    # is already applied, so a rebuild over a patched tree does not stop.
+    patch -p1 --forward < "$patch" || {
         echo "Error: Failed to apply $patch"
         exit 1
     }
@@ -74,7 +162,7 @@ for patch in "$EXTERNAL/cvi_rtsp/patches"/*.patch; do
     [ -f "$patch" ] || continue
 
     echo "Applying cvi_rtsp patch: $(basename "$patch")"
-    patch -p1 < "$patch" || {
+    patch -p1 --forward < "$patch" || {
         echo "Error: Failed to apply $patch"
         exit 1
     }
@@ -145,13 +233,19 @@ sed -i '/LOCAL_CFLAGS = $(DEFS) $(INCS)/i LIBS += -ltinyalsa' $PROJECT_OUT/cvi_m
 
 # override build_cvi_rtsp function
 sed -i 's/function build_cvi_rtsp()/function _build_cvi_rtsp_()/g' $PROJECT_OUT/build/envsetup_soc.sh || exit 1
+# MW_VER selects the middleware API generation: the service uses it in
+# "#if (MW_VER == 2)" and "#if MW_VER == 1". Without it the preprocessor gets
+# "-DMW_VER=" and the comparison becomes a syntax error. The middleware in
+# this tree is generation 1: it has no pkgconfig directory and does not
+# define _MIDDLEWARE_V2_, and the v1 code path uses CVI_BIN_SetBinName and
+# CVI_VI_SetDevNum, which the headers do provide.
 function build_cvi_rtsp()
 {(
     cd "$CVI_RTSP_PATH" || return
-    BUILD_SERVICE=1 MW_DIR=${MW_PATH} ./build.sh
-    BUILD_SERVICE=1 make install DESTDIR="$(pwd)/install" || return "$?"
+    BUILD_SERVICE=1 MW_DIR=${MW_PATH} MW_VER=1 ./build.sh
+    BUILD_SERVICE=1 MW_VER=1 make install DESTDIR="$(pwd)/install" || return "$?"
     make package DESTDIR="$(pwd)/install" || return "$?"
-    BUILD_SERVICE=1 make install DESTDIR="${SYSTEM_OUT_DIR}/usr" || return "$?"
+    BUILD_SERVICE=1 MW_VER=1 make install DESTDIR="${SYSTEM_OUT_DIR}/usr" || return "$?"
 )}
 
 # source envsetup_soc.sh

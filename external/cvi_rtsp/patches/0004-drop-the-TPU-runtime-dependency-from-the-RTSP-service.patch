@@ -1,0 +1,74 @@
+From: recamera-os <noreply@recamera.local>
+Subject: [PATCH] service: drop the TPU runtime dependency
+
+teaispdrc_helper.cpp includes bmruntime_interface.h from the TPU runtime.
+That header belongs to a newer generation of the TPU SDK than the one this
+tree ships, so the file does not compile at all.
+
+The dynamic range correction it implements is optional: it is switched
+off by default in the JSON configuration (enable-teaisp-drc). The stub
+provides the same entry points as no-ops, so the service builds and the
+camera streams without the TPU.
+
+Generated with diff -u against cvi_rtsp as vendored in this repo.
+
+
+--- a/service/Makefile	2026-11-12 18:58:14.540618051 +0000
++++ b/service/Makefile	2026-11-12 18:58:14.549687796 +0000
+@@ -5,7 +5,12 @@
+ SHARED = $(LIBNAME).so
+ STATIC = $(LIBNAME).a
+ 
+-CXX_SRCS = $(filter-out venc_json.cpp, $(wildcard *.cpp))
++# teaispdrc_helper.cpp pulls in bmruntime_interface.h from the TPU runtime.
++# That header belongs to a newer generation of the TPU SDK than the one this
++# tree ships, so the file does not compile. The dynamic range correction is
++# optional, it is switched off by default in the JSON configuration, so the
++# stub below provides the same entry points without the TPU dependency.
++CXX_SRCS = $(filter-out venc_json.cpp teaispdrc_helper.cpp, $(wildcard *.cpp))
+ CXX_OBJS = $(CXX_SRCS:.cpp=.o)
+ 
+ INNER_INC = -I../include
+
+diff --git a/service/teaispdrc_stub.cpp b/service/teaispdrc_stub.cpp
+new file mode 100644
+--- /dev/null
++++ b/service/teaispdrc_stub.cpp
+@@ -0,0 +1,37 @@
++/*
++ * Stub for the TPU dynamic range correction.
++ *
++ * The real implementation lives in teaispdrc_helper.cpp and needs
++ * bmruntime_interface.h from the TPU runtime, which this tree does not
++ * ship. The feature is optional and off by default in the JSON
++ * configuration, so the entry points are provided as no-ops.
++ */
++
++#include "ctx.h"
++#include "teaispdrc_helper.h"
++
++int init_teaisp_drc(SERVICE_CTX *ctx)
++{
++        (void)ctx;
++        return 0;
++}
++
++int deinit_teaisp_drc(SERVICE_CTX *ctx)
++{
++        (void)ctx;
++        return 0;
++}
++
++int get_teaisp_drc_video_frame(int pipe, void *video_frame)
++{
++        (void)pipe;
++        (void)video_frame;
++        return -1;
++}
++
++int put_teaisp_drc_video_frame(int pipe, void *video_frame)
++{
++        (void)pipe;
++        (void)video_frame;
++        return -1;
++}
