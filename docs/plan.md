@@ -1,10 +1,7 @@
 # Plan: minimal reCamera OS
 
-Every step has a goal, a concrete change and a way to check the result.
-The check is always a build, never the camera.
-
-The submodule review in [submodule-review.md](./submodule-review.md) is the
-evidence for the decisions below.
+Every step has a goal, a concrete change and a way to check the result. The check is always a build, never the camera.
+The submodule review in [submodule-review.md](./submodule-review.md) is the evidence for the decisions below.
 
 ## Baseline
 
@@ -34,9 +31,7 @@ The build environment on this machine:
 | Host toolchain | Incomplete. `dtc`, `squashfs-tools`, `flex`, `bison`, `mtools` and `libssl-dev` are missing, and the host has gcc 15 where the build expects gcc 11. |
 | Conclusion | The Docker build is the way. The container image carries the right toolchain. It needs a running daemon. |
 
-Two ways to get there: start the Docker daemon as a user, or run the build
-directly on the host after installing the missing packages.
-
+Two ways to get there: start the Docker daemon as a user, or run the build directly on the host after installing the missing packages.
 
 ### Step 0.2: Baseline inventory
 
@@ -49,12 +44,9 @@ Unpack the rootfs of the built image and list what is in it.
 | Check | The list is stored next to the build output. |
 | Note | This list is the checklist for the trimming steps later. |
 
-
 ## Step 1: Understand what is actually needed
 
-Before removing anything, find out which piece does what. The camera does not
-work through Node-RED or the supervisor, it works through the CVI pipeline:
-sensor, MIPI, VI, VPSS, encoder, RTSP.
+Before removing anything, find out which piece does what. The camera does not work through Node-RED or the supervisor, it works through the CVI pipeline: sensor, MIPI, VI, VPSS, encoder, RTSP.
 
 ### Step 1.1: Map the camera pipeline
 
@@ -67,8 +59,7 @@ sensor, MIPI, VI, VPSS, encoder, RTSP.
 
 ### Step 1.2: Find out what the blob does
 
-The `reCamera` buildroot package downloads a zip and copies its install tree
-into the target. Before dropping it, check what is in it.
+The `reCamera` buildroot package downloads a zip and copies its install tree into the target. Before dropping it, check what is in it.
 
 | | |
 |---|---|
@@ -79,9 +70,7 @@ into the target. Before dropping it, check what is in it.
 
 ## Step 2: A separate buildroot tree for the minimal image
 
-The upstream build mixes the camera and the app stack in one external tree.
-The minimal image gets its own tree so the upstream build stays untouched and
-can still be produced for comparison.
+The upstream build mixes the camera and the app stack in one external tree. The minimal image gets its own tree so the upstream build stays untouched and can still be produced for comparison.
 
 ### Step 2.1: New external tree
 
@@ -100,9 +89,7 @@ can still be produced for comparison.
 | Change | New file `external/configs/sg2002_recamera_minimal_defconfig`, based on the upstream one. |
 | Check | `make sg2002_recamera_minimal` picks up the new target. The Makefile derives the targets from the files in `external/configs/`. |
 
-The defconfig starts as a copy of the upstream one. The trimming happens in
-the packages, not in the defconfig, because most of the removed parts are not
-buildroot packages at all.
+The defconfig starts as a copy of the upstream one. The trimming happens in the packages, not in the defconfig, because most of the removed parts are not buildroot packages at all.
 
 ### Step 2.3: Build the unmodified minimal target
 
@@ -115,9 +102,7 @@ buildroot packages at all.
 
 ## Step 3: Remove the app layer
 
-This is where the image actually gets small. The parts below are the app stack:
-the web UI, the AI features, the flow editor. None of them are needed for a
-camera.
+This is where the image actually gets small. The parts below are the app stack: the web UI, the AI features, the flow editor. None of them are needed for a camera.
 
 ### Step 3.1: Drop the packages that carry the app layer
 
@@ -127,9 +112,7 @@ camera.
 | Change | In the minimal external tree: remove `reCamera`, `sscma-supervisor`, `sscma-node`, `opencv4`, `opencv4-contrib`, `libhv`, `morse_cli`. Set `BR2_PACKAGE_SSCMA_SUPERVISOR`, `BR2_PACKAGE_SSCMA_NODE`, `BR2_PACKAGE_RECAMERA` to `n`. |
 | Check | The build succeeds. The inventory shows no supervisor, no node-red, no opencv. |
 
-The supervisor is the one that matters most: it installs its own rootfs and
-starts the broker. Removing it takes the web UI, the device manager and the
-mosquitto broker with it.
+The supervisor is the one that matters most: it installs its own rootfs and starts the broker. Removing it takes the web UI, the device manager and the mosquitto broker with it.
 
 ### Step 3.2: Remove the infrastructure that only the app layer used
 
@@ -140,7 +123,6 @@ mosquitto broker with it.
 | Check | The inventory shows no mosquitto, no avahi, no ttyd. The build log has no error about a missing dependency. |
 | Note | Two packages in the Buildroot fork carry patches for packages a camera does not need: `freetype` and `zlog`. They go with the packages. `package/busybox/busybox.config` stays, it defines what the shell in the image can do. |
 
-
 ### Step 3.3: Keep the wireless stack that the camera needs
 
 | | |
@@ -150,9 +132,7 @@ mosquitto broker with it.
 | Check | The init script `loadsystemko.sh` no longer loads `dot11ah.ko` and `morse.ko`, but still loads `brcmfmac.ko` for the BCM43012 WiFi. |
 | Note | The HaLow chip (`morse.ko`, `dot11ah.ko`) is a separate 802.11ah radio. It is not the normal WiFi. Decide later whether the minimal image wants HaLow, normal WiFi or both. |
 
-Bluetooth is only on the `w` variant of the core board. The C1-2002w carries
-the WiFi/Bluetooth module, the C1-2002 does not. The `bt-init` package patches
-the BCM firmware at boot, which is the part that goes.
+Bluetooth is only on the `w` variant of the core board. The C1-2002w carries the WiFi/Bluetooth module, the C1-2002 does not. The `bt-init` package patches the BCM firmware at boot, which is the part that goes.
 
 ### Step 3.4: Keep one SSH server
 
@@ -172,7 +152,6 @@ the BCM firmware at boot, which is the part that goes.
 | Check | NTP is in the inventory and the init script starts it. |
 | Note | `openssl` is a dependency of `wpa_supplicant_s1g`, so it stays even if nothing else needs TLS. |
 
-
 ### Step 3.6: Drop FreeRTOS
 
 | | |
@@ -182,7 +161,6 @@ the BCM firmware at boot, which is the part that goes.
 | Check | The inventory has no FreeRTOS. The build log has no RTOS target. |
 | Note | The FreeRTOS forks are two years behind upstream. Dropping them also removes the oldest code in the image. |
 | Blocker | `rtos_cmdqu` is used by `rgn` (region) and `fast_image`, both part of the video pipeline. Before dropping it, check whether the RTOS core carries work the Linux side depends on. If it does, this step needs a different approach. |
-
 
 ### Step 3.7: Build live555 from source
 
@@ -194,7 +172,6 @@ the BCM firmware at boot, which is the part that goes.
 | Note | `cvi_rtsp/build.sh` only downloads the tarball when `LIVE555_DIR` is empty. Set it and the download never happens. The Buildroot package is version 2025.10.13, LGPL-3.0, with a checked hash. |
 | Detail | `cvi_rtsp/Makefile.inc` expects four static archives under `$(LIVE555_DIR)/lib/` and the headers in four separate include directories. The Buildroot layout has the headers in one directory, so `LIVE555_INC` has to be adjusted. |
 | Risk | If the paths do not line up, the `cvi_rtsp` build fails with a missing header. That is a build failure, not a silent problem. |
-
 
 ### Step 3.8: Drop the TPU stack
 
@@ -215,8 +192,7 @@ the BCM firmware at boot, which is the part that goes.
 
 ## Step 4: Check the packages that carry the attack surface
 
-Buildroot 2021.05 is end of life, the upstream branch stopped in June 2021. The
-minimal image has three packages that matter for a network reachable device.
+Buildroot 2021.05 is end of life, the upstream branch stopped in June 2021. The minimal image has three packages that matter for a network reachable device.
 
 ### Step 4.1: Check the versions
 
@@ -239,17 +215,13 @@ minimal image has three packages that matter for a network reachable device.
 ## Step 5: Trim the boot overlay
 
 The overlay sets up the writable root. Some of its parts belong to the app layer.
-
 Two places hold the init scripts:
 
 - `external/buildroot/board/cvitek/CV181X/overlay/etc/init.d/` has `S70hardware`,
-  `S80dnsmasq`, `S92node-red`, `S98ttyd` and `S99user`
+`S80dnsmasq`, `S92node-red`, `S98ttyd` and `S99user`
 - `external/ramdisk/rootfs/overlay/cv181x_musl_riscv64/system/` has the boot
-  scripts: `auto.sh`, `auto_download.sh`, `rootfs_overlay.sh`, `upgrade.sh` and
-  the usb networking scripts
-
-The `S99user` script sources `/mnt/system/auto.sh`, which starts the vendor
-application. That is the hook to the app layer.
+scripts: `auto.sh`, `auto_download.sh`, `rootfs_overlay.sh`, `upgrade.sh` and the usb networking scripts
+The `S99user` script sources `/mnt/system/auto.sh`, which starts the vendor application. That is the hook to the app layer.
 
 ### Step 5.1: Keep the overlay, drop the app hooks
 
@@ -269,7 +241,6 @@ application. That is the hook to the app layer.
 | Check | The script is not in the image. Nothing reaches out to github.com at boot. |
 | Note | `S99user` sources `/mnt/system/auto.sh`, and `auto.sh` is what starts the vendor application. Both the auto update and the app start have to go for the image to be self contained. |
 
-
 ### Step 5.3: Clean up the init scripts
 
 | | |
@@ -287,7 +258,6 @@ application. That is the hook to the app layer.
 | Check | The boot log lists the expected modules and no errors. |
 | Note | The module list also shows the hardware: `ti-ads1015.ko` for the battery on I2C1, `morse.ko` for the HaLow chip, `brcmfmac.ko` for the BCM43012 WiFi. |
 
-
 ## Step 6: The camera comes up
 
 This is the first step where the result is visible.
@@ -304,8 +274,7 @@ This is the first step where the result is visible.
 | Note | The build goes through `build_cvi_rtsp` in `external/setenv.sh` and lands in `${SYSTEM_OUT_DIR}/usr`, which is `/mnt/system/usr` at runtime. |
 | Note | `cvi_rtsp/build.sh` uses `LIVE555_DIR` when it is set and only downloads the tarball otherwise. Step 3.7 sets it. |
 
-The example programs are not built by default. `cvi_rtsp/Makefile` only adds them
-when `BUILD_EXAMPLE=1`:
+The example programs are not built by default. `cvi_rtsp/Makefile` only adds them when `BUILD_EXAMPLE=1`:
 
 ```make
 ifeq ($(BUILD_EXAMPLE),1)
@@ -313,11 +282,7 @@ SUBDIR += example
 endif
 ```
 
-So the minimal image needs `BUILD_EXAMPLE=1`, or a new buildroot package that
-builds the server from `example/rtsp_server_video.cpp`.
-
-
-
+So the minimal image needs `BUILD_EXAMPLE=1`, or a new buildroot package that builds the server from `example/rtsp_server_video.cpp`.
 
 ### Step 6.2: A minimal config for the stream
 
@@ -337,8 +302,7 @@ builds the server from `example/rtsp_server_video.cpp`.
 
 ## Step 7: ONVIF
 
-ONVIF is new code on top of the working camera. It is a separate step because it
-depends on the pipeline from step 5 being right.
+ONVIF is new code on top of the working camera. It is a separate step because it depends on the pipeline from step 5 being right.
 
 ### Step 7.1: Pick the approach
 
@@ -390,31 +354,22 @@ depends on the pipeline from step 5 being right.
 | 7 | ONVIF | The ONVIF service answers |
 | 8 | Flash and verify | The camera boots on the minimal image |
 
-Steps 0 to 2 are the safety net. Nothing is removed before step 3. Every step
-ends in a build that has to succeed.
-
-Step 2.3 is the important one: the minimal target builds and has the same
-content as the baseline. After that, every change is a difference from a known
-good state.
-
+Steps 0 to 2 are the safety net. Nothing is removed before step 3. Every step ends in a build that has to succeed.
+Step 2.3 is the important one: the minimal target builds and has the same content as the baseline. After that, every change is a difference from a known good state.
 
 ## Open questions
 
 - HaLow, normal WiFi, or both? The `morse.ko` and `dot11ah.ko` modules are for
-  the 802.11ah radio, `brcmfmac.ko` for the BCM43012.
+the 802.11ah radio, `brcmfmac.ko` for the BCM43012.
 - Is the OTA update wanted? It needs the `upgrade.sh` in the overlay.
 - Is the gimbal wanted? The CAN bus and the `gimbal` binary.
 - Is the battery wanted? The `ads1015` on I2C1 feeds the battery supervisor API.
 - Which sensor to target: OV5647, GC2053 or SC530AI? The defconfig enables all
-  three.
+three.
 - ONVIF: existing server or own implementation?
 - Does the Linux side talk to the FreeRTOS core? `rtos_cmdqu` is used by the
-  region and fast_image parts of the video pipeline.
+region and fast_image parts of the video pipeline.
 - Can the Docker daemon be started on this machine? The build needs it, and
-  there is no sudo.
+there is no sudo.
 - Is a kernel port to 6.4 or 7.x wanted later? It is not a step in this plan,
-  it is its own project. The breakdown is in
-  [kernel-upgrade.md](./kernel-upgrade.md).
-
-
-
+it is its own project. The breakdown is in [kernel-upgrade.md](./kernel-upgrade.md).
