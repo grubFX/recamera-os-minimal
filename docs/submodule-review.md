@@ -180,12 +180,42 @@ ahead=6 behind=0
 ```
 
 Six commits on top of upstream buildroot 2021.05, nothing missing. The changes
-are the board config and the init scripts. There is also a `buildroot-2023.11`
-branch in the same repo, but it has no CV181X support.
+are the board config and the init scripts.
 
-Buildroot 2021.05 itself is end of life upstream. The security-relevant
-packages in it are the ones to watch: dropbear, busybox, openssl. All three
-are in the image.
+**Buildroot 2021.05 is end of life.** The upstream branch got its last commit
+in June 2021 and no security fixes since. That matters, because the image
+carries dropbear, busybox and openssl from it.
+
+There is a `buildroot-2023.11` branch in the same Sophgo repo, but it has no
+CV181X support:
+
+```
+$ gh api /repos/sophgo/buildroot-2021.05/contents/board/sophgo?ref=buildroot-2023.11
+bm1688_wevb_emmc
+common
+cv186ah_wevb_emmc
+edge_buildroot
+```
+
+No `CV181X`. The board folder is also renamed from `cvitek` to `sophgo` there.
+So 2021.05 is the only Buildroot that can build this camera, with the
+Sophgo delta on top.
+
+**Recommendation:** stay on 2021.05. Then watch the three packages that carry
+the attack surface:
+
+- **dropbear**: the SSH server. Check the version in the image against the
+  upstream advisories.
+- **busybox**: the shell and the init. Check the version, the `ash` shell and
+  the applets have had CVEs.
+- **openssl**: needed by `wpa_supplicant_s1g` for WPA2/WPA3. It stays, so its
+  version needs to be checked.
+
+If any of them is too old, the practical option is to bump the single package
+in the Buildroot fork rather than to move the whole tree. A newer Buildroot
+would need the CV181X board support ported over, which is more work than
+patching one package.
+
 
 ### u-boot
 

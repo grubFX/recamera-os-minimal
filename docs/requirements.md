@@ -59,6 +59,10 @@ on the userdata partition. That is a design decision of the vendor image. It
 also carries the factory reset and the OTA update, which are worth keeping for
 a camera that can be bricked by a bad flash.
 
+One thing does not fit the description of a normal Linux system and goes:
+`auto_download.sh` polls the GitHub release feed of `reCamera-OS` every 60
+seconds and installs whatever it finds.
+
 The decision per piece is in [plan.md](./plan.md).
 
 ## 5. The camera has to work
@@ -67,9 +71,22 @@ Camera, RTSP, SSH, WiFi, NTP. ONVIF afterwards.
 
 **Status: open.** This is what the plan is for.
 
-## 6. Everything is committed and pushed
+## 6. No known CVE in the network facing packages
+
+The image is reachable from the network. Dropbear, busybox and openssl have to
+be on versions without known vulnerabilities.
+
+**Status: open.** Buildroot 2021.05 is end of life, its upstream branch stopped
+in June 2021. The newer Buildroot in the same Sophgo repo has no CV181X
+support, so the fix is to bump the single package in the fork, not to move the
+tree.
+
+Plan step 4.
+
+## 7. Everything is committed and pushed
 
 Work happens on the `develop` branch of `grubFX/recamera-os-minimal`, in small
 commits that can be read on their own.
 
 **Status: in progress.**
+
