@@ -30,14 +30,6 @@ UTIL_LINUX_DEPENDENCIES = \
 	$(if $(BR2_PACKAGE_UTIL_LINUX_LIBS),util-linux-libs) \
 	$(TARGET_NLS_DEPENDENCIES)
 
-# The release tarball ships a pre-generated 'configure' script.  Patches that
-# touch configure.ac therefore have no effect, because Buildroot runs the
-# shipped script instead of regenerating it.  Enabling AUTORECONF makes
-# Buildroot regenerate configure/config.h.in from the patched configure.ac
-# before configuring.  This pulls in host-autoconf/host-automake/host-libtool
-# as build dependencies, so the result does not depend on tools being
-# installed in the build environment.
-UTIL_LINUX_AUTORECONF = YES
 UTIL_LINUX_CONF_OPTS += \
 	--disable-rpath \
 	--disable-makeinstall-chown
