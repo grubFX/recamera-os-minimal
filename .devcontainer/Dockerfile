@@ -67,9 +67,6 @@ RUN apt update && export DEBIAN_FRONTEND=noninteractive \
     gcc \
     g++ \
     libbz2-dev \
-    lib32c-dev \
-    lib32stdc++6 \
-    libpcre3-dev \
     unzip \
     ca-certificates \
     lsb-release \
@@ -85,6 +82,7 @@ RUN apt update && export DEBIAN_FRONTEND=noninteractive \
     zip \
     gawk \
     xz-utils \
+    file \
  && ln -sf /usr/bin/python3 /usr/local/bin/python || true
 
 # The riscv64 musl toolchain from the riscv-collab project. It is needed
