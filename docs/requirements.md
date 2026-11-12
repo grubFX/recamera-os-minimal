@@ -21,6 +21,45 @@ binaries. Live555 is LGPL-3.0 and available as a Buildroot package with a verifi
 Goes with the TPU stack.
 The `reCamera.zip` blob is already dead, its source branch no longer exists upstream.
 
+### The live555 blob was checked in detail
+
+The blob was verified against the upstream source, header by header, using the
+`rgaufman/live555` Git mirror.
+
+```
+live.2020.04.24   175 of 181 headers byte identical
+                   6 differ, 4 of them only in the version string
+```
+
+The blob is Live555 **2020.07.21**, one release newer than the commit that
+was compared. The headers are unmodified upstream code, there is no injected
+code in them.
+
+The four static archives are the problem:
+
+```
+lib/libUsageEnvironment.a
+  UsageEnvironment.o
+  HashTable.o
+  strDup.o
+
+GCC: (Xuantie-900 linux-5.10.4 musl gcc Toolchain V2.6.1 B-20220906) 10.2.0
+```
+
+Compiled objects, no source, built with the vendor cross compiler. The
+source is identifiable, but the compiled artifacts cannot be verified against
+a reference build without reproducing the vendor toolchain. That is what
+requirement 2 forbids, so the blob goes and Live555 is built from source.
+
+One problem with the Buildroot package has to be fixed along the way: the
+official site no longer serves the tarballs.
+
+```
+http://www.live555.com/liveMedia/public/live.2021.05.03.tar.gz   404
+```
+
+The package has to switch to a Git clone with a pinned commit.
+
 ## 3. No hidden code in the forks
 
 The forks of upstream software must be small enough to audit, and the delta must be documented.
@@ -43,6 +82,17 @@ b4ca5efcaf  2024-02-14  linux porting cvitek asic chips.
 
 plus 28 `weekly rls` commits. The stable releases carry upstream fixes, not vendor code.
 
+### The vendor app stack is a separate question
+
+The `sscma-example-sg200x` fork is not in this table, because it is not a
+fork of an upstream project. It is the Seeed application stack, Apache-2.0,
+and it is the source of the code the minimal image reuses.
+
+The ONVIF implementation comes from there, and it was checked: it is in the
+public repository under `solutions/sscma-node/main/node/onvif/`, 1267 lines
+across 8 files, with the Apache-2.0 license header intact. It has no
+reference to the video pipeline at all.
+
 ## 4. Normal Linux, no weird patches
 
 The result has to be a normal Linux system. No patched binaries, no initializer that only works on this one device, no hidden state.
@@ -60,9 +110,38 @@ Camera, RTSP, ONVIF, SSH, WiFi, NTP.
 
 The camera has to be discoverable and controllable from a standard ONVIF client. Without pulling a SOAP stack into the image.
 
-**Status: open, approach decided.** `roleoroleo/onvif_simple_server`. A C implementation for resource constrained devices, no gsoap and no libxml, it runs as CGI under the BusyBox httpd that is already in the image. It implements Profile S and Profile T.
+**Status: open, approach decided, implementation found.**
 
-The dependencies are libtomcrypt, zlib and json-c. All three exist in Buildroot, two of them are already in the image.
+The vendor stack already has an ONVIF implementation. It is in the public
+Apache-2.0 repository `Seeed-Studio/sscma-example-sg200x`, in the directory
+`solutions/sscma-node/main/node/onvif/`, 1267 lines across 8 files. The
+CHANGELOG entry for 0.2.5 records it as a shipped feature.
+
+```
+GetProfiles            GetStreamUri             GetCapabilities
+GetDeviceInformation   GetServices              GetSystemDateAndTime
+GetVideoEncoderConfiguration
+GetGuaranteedNumberOfVideoEncoderInstances
+GetHostname            GetUsers                 GetEndpointReference
+```
+
+The dependency situation is the reason to prefer it:
+
+| Need | Vendor implementation | `onvif_simple_server` |
+|---|---|---|
+| HTTP server | libhv, already in the image | BusyBox httpd, already in the image |
+| Crypto | OpenSSL, already in the image | libtomcrypt, new |
+| XML | hand written scanner | ezxml |
+| SOAP stack | none | none |
+
+No new dependency in the image, and the implementation was tested against
+real NVRs, including the fix for a truncated `GetCapabilities` response that
+Hikvision NVRs read as invalid XML.
+
+The work is the extraction. The code is compiled into `sscma-node`, the
+Node-RED node binary, and it has to become a standalone daemon. The vendor
+coupling is four symbols: `ma::Mutex`, `ma::Guard`, `ma_err_t` and
+`PROJECT_VERSION`.
 
 The details are in [onvif.md](./onvif.md).
 

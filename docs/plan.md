@@ -26,12 +26,45 @@ The build environment on this machine:
 
 | | |
 |---|---|
-| Docker | Installed, but the daemon does not run and there is no sudo. |
+| Docker client | 29.7.2, installed. |
+| Docker daemon | Not running. `/var/run/docker.sock` does not exist. |
+| systemd | `offline`. `systemctl start docker` is not possible. |
+| Rootless Docker | `dockerd-rootless.sh`, `rootlesskit` and `slirp4netns` are all present, and `XDG_RUNTIME_DIR` is set. |
 | Disk | The workspace sits on an ext4 partition with 440 GB free. |
 | Host toolchain | Incomplete. `dtc`, `squashfs-tools`, `flex`, `bison`, `mtools` and `libssl-dev` are missing, and the host has gcc 15 where the build expects gcc 11. |
-| Conclusion | The Docker build is the way. The container image carries the right toolchain. It needs a running daemon. |
+| Conclusion | The build goes through CI. |
 
-Two ways to get there: start the Docker daemon as a user, or run the build directly on the host after installing the missing packages.
+### The build path is CI, not Docker
+
+The GitHub workflow builds without Docker at all. It runs on `ubuntu-24.04`,
+installs the build dependencies with apt, and calls `make <target>` directly.
+The riscv64-musl toolchain and the ccache directory are cached between runs.
+
+```
+.github/workflows/main.yml
+  runs-on: ubuntu-24.04
+  run: make ${{ matrix.target }}
+```
+
+This was found while planning and it changes the setup. The workflow needs
+two changes to build the minimal target:
+
+- A matrix entry for the new target.
+- A trigger on `push` to `develop`, so a build runs on every commit instead
+  of only on a tag.
+
+The workflow currently only runs on a tag push or a manual dispatch, and it
+reads the CHANGELOG to decide what to build. For the minimal target the
+CHANGELOG entry has to exist under the target name, same as the vendor
+targets.
+
+Two other things the CI gives for free:
+
+- The Node.js build is the expensive part. The comment in the workflow says
+  "V8/nodejs compile alone needs ~4.5h on a 4-core runner". The minimal image
+  has no Node.js, so the build is much faster.
+- The toolchain cache is keyed on `riscv64-musl-gcc-ubuntu-24.04-2026.10.21`
+  and does not depend on the target, so the minimal build reuses it.
 
 ### Step 0.2: Baseline inventory
 
@@ -72,6 +105,62 @@ The `reCamera` buildroot package downloads a zip and copies its install tree int
 
 The upstream build mixes the camera and the app stack in one external tree. The minimal image gets its own tree so the upstream build stays untouched and can still be produced for comparison.
 
+### How the build is wired
+
+This was traced through the build scripts, because it decides what the
+minimal tree has to look like.
+
+```
+Makefile                       the target list comes from external/configs/*_defconfig
+external/build.sh              sets BR2_EXTERNAL, sources setenv.sh, calls defconfig
+external/setenv.sh             copies the SDK, applies the patches, sources envsetup_soc.sh
+build/envsetup_soc.sh          sets BR_DEFCONFIG and BR_OVERLAY_DIR
+build/Makefile                 make -C buildroot-2021.05 <BR_DEFCONFIG>
+```
+
+Two things follow from this:
+
+- `BR2_EXTERNAL` is a single directory, set in `external/build.sh`. A second
+  external tree needs its own copy of that script, or a parameter.
+- The buildroot defconfig is always `cvitek_CV181X_musl_riscv64_defconfig`.
+  It is derived from the chip and the SDK version, not from the project:
+
+```
+build/envsetup_soc.sh:882
+  export BR_DEFCONFIG=${BR_BOARD}_defconfig
+```
+
+So the package selection for the minimal image cannot live in a new
+buildroot defconfig file without changing that line. The practical way is to
+keep the buildroot defconfig and let the external tree override the
+packages.
+
+### Where the external packages are enabled
+
+The external packages are not listed in the buildroot defconfig. They are
+enabled by their own `Config.in` defaults:
+
+```
+external/br2-external/bt-init/Config.in       default y
+external/br2-external/libhv/Config.in          default y
+external/br2-external/morse_cli/Config.in      default y
+external/br2-external/sscma-node/Config.in     default y
+external/br2-external/sscma-supervisor/Config.in  default y
+external/br2-external/reCamera/Config.in       default n
+```
+
+That is the mechanism. A package with `default y` is built unless the
+defconfig says otherwise, and the defconfig does not mention any of them.
+
+For the minimal tree this is the lever. Every package that should not be in
+the image gets `default n`, and the ones that stay get `default y` without
+touching the buildroot defconfig.
+
+| | |
+|---|---|
+| Note | `sscma-node` selects `mosquitto`, `libhv`, `alsa-lib` and `alsa-utils` in its `Config.in`. Dropping it drops those too, which is what Step 3 wants. |
+| Note | `opencv4` has no `default` line, so it is off unless something selects it. |
+
 ### Step 2.1: New external tree
 
 | | |
@@ -89,7 +178,30 @@ The upstream build mixes the camera and the app stack in one external tree. The 
 | Change | New file `external/configs/sg2002_recamera_minimal_defconfig`, based on the upstream one. |
 | Check | `make sg2002_recamera_minimal` picks up the new target. The Makefile derives the targets from the files in `external/configs/`. |
 
-The defconfig starts as a copy of the upstream one. The trimming happens in the packages, not in the defconfig, because most of the removed parts are not buildroot packages at all.
+The defconfig starts as a copy of the upstream one. The trimming happens in
+the packages, not in the defconfig, because most of the removed parts are not
+buildroot packages at all.
+
+The upstream defconfig is 32 lines and sets the project level: the chip, the
+board, the DDR config, the cross compiler, the sensor, the storage type and
+the kernel. None of that changes for the minimal image, it is the same
+camera.
+
+```
+CONFIG_CHIP_sg2002=y
+CONFIG_BOARD_recamera_emmc=y
+CONFIG_CROSS_COMPILE="riscv64-unknown-linux-musl-"
+CONFIG_SENSOR_OV_OV5647=y
+CONFIG_STORAGE_TYPE_emmc=y
+```
+
+The packages are in the buildroot defconfig, 572 lines with 115 enabled
+packages. That is the file the trimming touches, not the project defconfig.
+
+| | |
+|---|---|
+| Note | The board directory `external/build/boards/cv181x/sg2002_recamera_emmc/` holds the DTS, the partition table, the U-Boot config, the kernel config and the rootfs overlay. The minimal target needs its own directory there, or it reuses the existing one with a different overlay. |
+| Check | `external/build/boards/cv181x/` currently has `sg2002_recamera_emmc`, `sg2002_recamera_sd` and `sg2002_xiao_sd`. A minimal target needs a fourth. |
 
 ### Step 2.3: Build the unmodified minimal target
 
@@ -169,9 +281,100 @@ Bluetooth is only on the `w` variant of the core board. The C1-2002w carries the
 | Goal | No prebuilt binaries in the image. |
 | Change | Enable `BR2_PACKAGE_LIVE555` with `BR2_STATIC_LIBS=y` in the minimal external tree. Point the `cvi_rtsp` build at the result instead of the tarball. |
 | Check | The image contains the four live555 static libraries and they were built from the Buildroot package, not copied from `oss/`. |
-| Note | `cvi_rtsp/build.sh` only downloads the tarball when `LIVE555_DIR` is empty. Set it and the download never happens. The Buildroot package is version 2025.10.13, LGPL-3.0, with a checked hash. |
+| Note | `cvi_rtsp/build.sh` only downloads the tarball when `LIVE555_DIR` is empty. Set it and the download never happens. |
 | Detail | `cvi_rtsp/Makefile.inc` expects four static archives under `$(LIVE555_DIR)/lib/` and the headers in four separate include directories. The Buildroot layout has the headers in one directory, so `LIVE555_INC` has to be adjusted. |
 | Risk | If the paths do not line up, the `cvi_rtsp` build fails with a missing header. That is a build failure, not a silent problem. |
+
+#### What the live555 blob actually is
+
+The blob was checked against the upstream source. The result is good news
+with one caveat.
+
+```
+oss/oss_release_tarball/musl_riscv64/live555.tar.gz
+  include/    181 headers
+  lib/        4 static archives, 4.9 MB
+  bin/        45 example binaries
+```
+
+The headers were compared file by file against the `rgaufman/live555` Git
+mirror, which is an unofficial but faithful mirror of the official source.
+
+```
+live.2020.04.24   175 of 181 headers byte identical
+                   6 differ, 4 of them only in the version string
+```
+
+The six differences are the version files. They say `2020.07.21` instead of
+`2020.04.24`, so the blob is one release newer than the commit that was
+compared. The remaining two are `liveMedia.hh`, which is an include list,
+and `ProxyServerMediaSession.hh`.
+
+**The headers are unmodified upstream Live555 code.** There is no injected
+code in them.
+
+The caveat is the archives:
+
+```
+lib/libUsageEnvironment.a
+  UsageEnvironment.o
+  HashTable.o
+  strDup.o
+```
+
+They contain compiled objects, not source. And the objects carry the build
+signature of the vendor toolchain:
+
+```
+GCC: (Xuantie-900 linux-5.10.4 musl gcc Toolchain V2.6.1 B-20220906) 10.2.0
+```
+
+So the blob is Live555 2020.07.21, compiled by Sophgo with their cross
+compiler. The source is identifiable and matches upstream, but the compiled
+artifacts cannot be verified byte by byte against a reference build without
+reproducing the vendor toolchain.
+
+This is exactly what the hard requirement forbids, so the step stays. The
+Buildroot package builds the same version from source with a checked hash.
+
+| | |
+|---|---|
+| Note | The Buildroot package in the tree is version 2021.05.03, not the 2020.07.21 the blob holds. `live555.hash` has the sha256, so the download is verified. The version difference is one release and the API used by `cvi_rtsp` did not change. |
+| Check | `strings` on the object files shows the Xuantie compiler only for the blob build. The Buildroot build shows the riscv64-musl toolchain. |
+| Detail | The `cvi_rtsp` service uses `ServerMediaSubsession` 43 times, `UsageEnvironment` 34 times, `ServerMediaSession` 20 times, `RTSPServer` 9 times, `BasicUsageEnvironment` 3 times and `Medium` 2 times. All of it is the stable server API. |
+
+#### The live555 tarball is no longer downloadable
+
+The official site does not serve the tarballs any more:
+
+```
+http://www.live555.com/liveMedia/public/live.2020.05.21.tar.gz   404
+http://www.live555.com/liveMedia/public/live.2021.05.03.tar.gz   404
+http://www.live555.com/liveMedia/public/live.2025.10.13.tar.gz   404
+```
+
+The homepage loads, but the `public/` directory does not. The Buildroot
+package points at that URL with an `md5` and a `sha256`, so the build would
+fail with a download error.
+
+The Git mirror works and is the way to fix this:
+
+```
+https://github.com/rgaufman/live555
+  LGPL-3.0, 872 stars, not archived, last push 2026-07-29
+  mirror of the official source, tracks the upstream releases
+```
+
+The package has to switch from a tarball download to a Git clone with a
+pinned tag. The upstream release tags are in the history as "Version bump
+to YYYY.MM.DD" commits, not as Git tags, so the pin has to be a commit SHA.
+
+| | |
+|---|---|
+| Change | Replace `LIVE555_SITE` and `LIVE555_SOURCE` with `LIVE555_SITE_METHOD = git`, a pinned `LIVE555_GIT_TAG`, and drop the tarball hash in favour of a `BR2_GLOBAL_HASH` or no hash for a pinned commit. |
+| Check | The download step of the package succeeds and produces the four archives. |
+| Note | The mirror history was verified to contain the 2020.04.24 and 2021.x version bumps, so the versions the vendor used are reachable. |
+| Alternative | Keep the tarball and mirror it somewhere reachable. That needs a place to host it, the Git mirror avoids that. |
 
 ### Step 3.8: Drop the TPU stack
 
@@ -304,82 +507,94 @@ So the minimal image needs `BUILD_EXAMPLE=1`, or a new buildroot package that bu
 
 ONVIF is a direct goal of the image, not a later idea. The camera speaks RTSP already, ONVIF is the discovery layer on top.
 
-The approach is decided: `roleoroleo/onvif_simple_server`. It is a C implementation for resource constrained devices, without gsoap and without libxml. It runs as CGI under the BusyBox httpd that is already in the image.
+The approach is not to write an ONVIF implementation. The vendor stack already has one, in the public Apache-2.0 repository, 1267 lines across 8 files, and it was tested against real NVRs. It is compiled into `sscma-node`, the Node-RED node binary, so it has to be lifted out into its own daemon.
 
 The details are in [onvif.md](./onvif.md).
 
-### Step 7.1: The buildroot package
+### Step 7.1: Extract the module
 
 | | |
 |---|---|
-| Goal | `onvif_simple_server` builds and is in the image. |
-| Change | A new package in the minimal external tree. Upstream has a plain Makefile, no autotools. Build the three binaries: the server, the notify server and the web services discovery server. |
-| Check | The three binaries are in the image. The build log has no error about a missing dependency. |
-| Dependencies | libtomcrypt for the crypto, zlib and json-c. All three exist in Buildroot. zlib and json-c are already in the image. |
-| Note | The upstream Makefile picks the crypto library with `HAVE_WOLFSSL` or `HAVE_MBEDTLS`, otherwise it uses libtomcrypt. libtomcrypt is the smaller one. |
+| Goal | The ONVIF code exists as a standalone package, not inside the Node-RED node. |
+| Change | Copy the eight files from `solutions/sscma-node/main/node/onvif/` into a new package `external/br2-external-minimal/onvifd/`. Add a `main.cpp` that reads the configuration, registers the profiles and keeps the service running. |
+| Check | The package builds. The binary is in the image. |
+| Source | `https://github.com/Seeed-Studio/sscma-example-sg200x`, the `onvif/` directory, Apache-2.0. The license header stays on every file. |
+| Note | The code is copied, not written. The Apache-2.0 license requires the notice to be kept and allows reuse in a proprietary image. |
 
-### Step 7.2: The configuration
-
-| | |
-|---|---|
-| Goal | The server knows the camera identity and the two streams. |
-| Change | A configuration file with the model, manufacturer, firmware version, hardware id and serial number from the supervisor API. Two profiles, the main stream and the sub stream. |
-| Check | The file is in the image and the server starts with it. |
-| Note | The serial number and the firmware version come from `/api/deviceMgr/queryDeviceInfo`. The identity should match what the device reports, a client checks it. |
-
-### Step 7.3: Two RTSP streams
+### Step 7.2: Drop the vendor dependencies
 
 | | |
 |---|---|
-| Goal | The camera serves a main and a sub stream, with the names the ONVIF configuration points at. |
-| Change | The `cvi_rtsp` JSON configuration gets two entries. The session names have to match the paths in the ONVIF configuration, `ch0_0.h264` and `ch0_1.h264`. |
+| Goal | The extracted code does not need the Node-RED framework. |
+| Change | `ma::Mutex` and `ma::Guard` become `std::mutex` and `std::lock_guard`. `ma_err_t` becomes `int`. `PROJECT_VERSION` becomes a string from the build configuration. |
+| Check | The package builds without the `SSCMA-Micro` submodule. No `core/ma_debug.h` include is left. |
+| Detail | `ma_debug.h` is only used for the `MA_LOG*` macros. They map to `ma_printf`. The replacement is a logging macro that writes to stderr, or the BusyBox syslog. |
+| Note | This is the whole vendor coupling. The rest is libhv, OpenSSL and POSIX sockets. |
+
+### Step 7.3: The buildroot package
+
+| | |
+|---|---|
+| Goal | `onvifd` builds and is in the image. |
+| Change | The new package selects `BR2_PACKAGE_LIBHV` and `BR2_PACKAGE_OPENSSL`. libhv is already in the upstream external tree, so the minimal tree gets the same package definition. |
+| Check | The binary is in the image. The build log has no missing dependency. |
+| Dependencies | libhv and OpenSSL. Both are already in the image. Nothing new. |
+| Note | `libhv` in `external/br2-external/libhv/` is version v1.3.3, from `ithewei/libhv`, and it depends on openssl. It also enables MQTT, which the minimal image does not need, but the flag is in the configure line of the existing package. |
+
+### Step 7.4: The configuration file
+
+| | |
+|---|---|
+| Goal | The daemon knows the camera identity and the two streams. |
+| Change | A configuration file with the model, manufacturer, firmware version, serial number, the RTSP port, the RTSP path, the ONVIF port and the credentials. |
+| Check | The daemon starts with it and the SOAP endpoint answers. |
+| Note | The serial number comes from the U-Boot environment, `fw_printenv -n sn`. `uboot-envtools` is already in the image because `libubootenv` is enabled. The vendor code already does this, the extracted code keeps that function. |
+
+### Step 7.5: Two RTSP streams
+
+| | |
+|---|---|
+| Goal | The camera serves a main and a sub stream, with the names the ONVIF profiles point at. |
+| Change | The `cvi_rtsp` JSON configuration gets two entries. The session names have to match the path in the ONVIF profiles. |
 | Check | The JSON parses, and the paths in it match the ONVIF configuration. |
+| Detail | The vendor stream node uses the session name `live` and derives the path as `/` plus the session name. So the ONVIF profile points at `rtsp://<ip>:554/live`. The `cvi_rtsp` configuration has to use the same name. This is the one place where the two sides have to agree. |
 | Note | The chip has `VENC_MAX_CHN_NUM 16`, two channels are plenty. The service library itself supports `SERVICE_CTX_ENTITY_MAX_NUM 2` entities. |
 
-### Step 7.4: The http server
+### Step 7.6: The SOAP endpoint
 
 | | |
 |---|---|
 | Goal | The ONVIF endpoint answers. |
-| Change | Configure BusyBox httpd to run the CGI. The upstream project has a patch for BusyBox httpd to serve the `onvif/` path, it needs to go into the Buildroot tree. |
-| Check | The endpoint `http://<ip>:<port>/onvif/device_service` answers with a device description. |
-| Note | The upstream project runs its own example with lighttpd, that is only for the test setup. For the image it is BusyBox httpd. |
+| Change | None, the daemon serves it on the libhv HTTP server. |
+| Check | `http://<ip>:8899/onvif/device_service` answers with a device description, and `GetProfiles` returns both streams. |
+| Note | The port is the vendor default, 8899. It does not collide with anything in the image. |
 
-### Step 7.5: Web services discovery
+### Step 7.7: Web services discovery
 
 | | |
 |---|---|
 | Goal | A client finds the camera without knowing the address. |
-| Change | An init script for `wsd_simple_server`, it answers on UDP 3700. |
-| Check | The process is running and listening. |
-| Note | Without this the camera only shows up when the address is entered by hand. |
+| Change | None, the daemon already has the responder. It binds UDP 3702 and answers the probe. |
+| Check | The process is running and listening. A client that scans finds the camera. |
+| Note | Without this the camera only shows up when the address is entered by hand. The vendor port is 3702, the ONVIF standard default is 3700. Both are used in the field, the vendor one works with the NVRs that were tested. |
 
-### Step 7.6: Snapshot, optional
+### Step 7.8: Snapshot, optional
 
 | | |
 |---|---|
 | Goal | A still image for the ONVIF snapshot URL. |
 | Change | A CGI script that grabs one JPEG from the pipeline and writes it to stdout. The encoder supports `CVI_RTSP_VIDEO_JPEG`. |
 | Check | The snapshot URL returns a JPEG. |
-| Note | Many clients show a thumbnail in the device list. Without it the entry is blank. |
+| Note | The vendor implementation has no snapshot operation. Many clients show a thumbnail in the device list. Without it the entry is blank. This is new work. |
 
-### Step 7.7: PTZ, optional
+### Step 7.9: PTZ, optional
 
 | | |
 |---|---|
 | Goal | The gimbal is controllable from an ONVIF client. |
-| Change | The PTZ section of the configuration with the scripts for the position and the movement commands. They call the CAN interface of the gimbal. |
+| Change | The four ONVIF PTZ operations, plus the scripts for the position and the movement commands. They call the CAN interface of the gimbal. |
 | Check | A client can move the gimbal. |
-| Note | Only if the gimbal is in scope. A camera without a gimbal leaves the section out, PTZ is optional in ONVIF. |
-
-### Step 7.8: Events, optional
-
-| | |
-|---|---|
-| Goal | The camera reports events to the client. |
-| Change | The notify server with the event configuration. It reads the event state from files. |
-| Check | The notify server answers. |
-| Note | Without the AI stack there is no motion detection, so there is nothing to report. This step only makes sense together with some event source. |
+| Note | The vendor implementation has no PTZ. Only if the gimbal is in scope. A camera without a gimbal leaves it out, PTZ is optional in ONVIF. |
 
 ## Step 8: Flash and verify
 
@@ -419,6 +634,26 @@ Step 2.3 is the important one: the minimal target builds and has the same conten
 
 The plan produces a camera with RTSP and ONVIF. Not a web UI, not a flow editor, not a broker.
 
+### The build runs in CI
+
+Every step ends in a build, and the build runs in the GitHub workflow. It
+has to, because the local machine has no running Docker daemon and systemd
+is offline.
+
+The workflow needs to be extended before the first build of the minimal
+target can happen:
+
+| | |
+|---|---|
+| Change | Add `sg2002_recamera_minimal` to the matrix in `.github/workflows/main.yml`. |
+| Change | Add a `push` trigger on `develop`, so a build runs on every commit and not only on a tag. |
+| Check | A push to `develop` starts a run and the run produces the zip files. |
+| Note | The workflow reads the CHANGELOG to decide what to build, and it looks for the target name under the version heading. A CHANGELOG entry with a `### sg2002_recamera_minimal` section is needed. |
+| Note | The `output/sg2002_recamera_emmc/buildroot-2021.05/dl` cache path in the workflow is hardcoded to the emmc target. A second target needs its own cache path, or the download directory has to be shared. |
+
+The toolchain cache does not depend on the target, so the minimal build
+reuses it.
+
 ## Open questions
 
 - HaLow, normal WiFi, or both? The `morse.ko` and `dot11ah.ko` modules are for
@@ -430,12 +665,24 @@ the 802.11ah radio, `brcmfmac.ko` for the BCM43012.
 three.
 - Does the Linux side talk to the FreeRTOS core? `rtos_cmdqu` is used by the
 region and fast_image parts of the video pipeline.
-- Can the Docker daemon be started on this machine? The build needs it, and
-there is no sudo.
 - Is a kernel port to 6.4 or 7.x wanted later? It is not a step in this plan,
 it is its own project. The breakdown is in [kernel-upgrade.md](./kernel-upgrade.md).
-- Which ONVIF port? The default in the upstream example is 8080, the ONVIF standard is 80.
-- Is the snapshot wanted? Many clients show a thumbnail in the device list, it needs a CGI script that grabs one JPEG.
-- Is PTZ wanted? It needs the CAN interface of the gimbal and four small scripts.
-- Are ONVIF events wanted? Without the AI stack there is no motion detection, so there is nothing to report.
-- Which crypto library for the ONVIF server? libtomcrypt is the smallest, mbedtls and wolfssl are the alternatives.
+
+The ones below are answered by the code and do not need a decision:
+
+- **The Docker daemon.** The build goes through CI, it does not need Docker
+  locally. The workflow builds without a container.
+- **The ONVIF port.** 8899, the vendor default. It does not collide with
+  anything in the image.
+- **The crypto library for ONVIF.** There is no choice to make. The vendor
+  implementation uses OpenSSL for SHA1, and OpenSSL is already in the image.
+  No libtomcrypt, no mbedtls, no wolfssl.
+
+Still open, and they are additions on top of the extracted module:
+
+- Is the snapshot wanted? Many clients show a thumbnail in the device list, it
+  needs a CGI script that grabs one JPEG.
+- Is PTZ wanted? It needs the CAN interface of the gimbal and four small
+  scripts, plus four ONVIF operations that do not exist yet.
+- Are ONVIF events wanted? Without the AI stack there is no motion detection,
+  so there is nothing to report.

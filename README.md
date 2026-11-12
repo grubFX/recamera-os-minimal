@@ -7,6 +7,7 @@
     - [2.3.2 Checkout code](#232-checkout-code)
     - [2.3.3 Build](#233-build)
   - [2.4 Flashing](#24-flashing)
+- [3. The minimal image](#3-the-minimal-image)
 
 ## 1. Official reference
 
@@ -163,3 +164,35 @@ Please refer to [Dev Containers](https://marketplace.visualstudio.com/items?item
 - OTA (Example: sg2002_reCamera_0.0.1_emmc_ota.zip)
     
     - This image is specifically designed for OTA updates via the WebUI.
+
+## 3. The minimal image
+
+This fork also carries a plan for a minimal image of the same camera: no
+Node-RED, no MQTT broker, no web UI, no AI stack. RTSP, ONVIF, SSH, WiFi and
+NTP.
+
+The plan is in [docs/plan.md](./docs/plan.md). The decisions and the
+evidence behind them are in the other files under [docs/](./docs/).
+
+| Document | What it covers |
+|---|---|
+| [plan.md](./docs/plan.md) | The work plan. Eight steps, every step with a goal, a concrete change and a check. |
+| [requirements.md](./docs/requirements.md) | The eight hard requirements and their status. |
+| [minimal-os.md](./docs/minimal-os.md) | What stays in the image and what goes, and why. |
+| [submodule-review.md](./docs/submodule-review.md) | All 25 submodules, checked for forks, blobs and hidden code. |
+| [onvif.md](./docs/onvif.md) | The ONVIF decision and how the implementation is extracted. |
+| [kernel-upgrade.md](./docs/kernel-upgrade.md) | What a port to a newer kernel would cost. |
+
+### Building the minimal target
+
+The build goes through the GitHub workflow. It runs on `ubuntu-24.04`,
+installs the dependencies and calls `make <target>` directly, without a
+container. The riscv64-musl toolchain and the ccache directory are cached
+between runs.
+
+The upstream workflow only runs on a tag push. For the minimal target it
+needs a matrix entry and a `push` trigger on `develop`.
+
+To build it locally instead, the requirements are the same as for the
+upstream target, see [section 2.3](#23-build-in-host). The container route
+needs a running Docker daemon.

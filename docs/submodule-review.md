@@ -251,11 +251,12 @@ These are the files that are not source code. This is the part that matters most
 
 ### live555.tar.gz: a real blob
 
-`sophgo/oss` at `oss_release_tarball/musl_riscv64/live555.tar.gz` contains **only compiled binaries**:
+`sophgo/oss` at `oss_release_tarball/musl_riscv64/live555.tar.gz` contains the
+Live555 headers and **compiled libraries**:
 
 ```
-$ tar tzf live555.tar.gz | grep -cE '\.(c|cpp)$'
-1
+$ tar tzf live555.tar.gz | grep -cE '\.(h|hh)$'
+182
 $ tar tzf live555.tar.gz | grep -cE '\.(a|so)$'
 4
 $ tar tzf live555.tar.gz | wc -l
@@ -280,14 +281,65 @@ LIVE555_LIB ?= $(LIVE555_DIR)/lib/libliveMedia.a $(LIVE555_DIR)/lib/libBasicUsag
 ```
 
 The tarball also carries `bin/live555MediaServer`. That binary is not used by `cvi_rtsp`. The server class in `cvi_rtsp` is `CVI_RTSP`, it inherits from the Live555 `RTSPServer` class and links the four libraries above. The generic `live555MediaServer` is a separate program that comes with the same tarball.
-Live555 itself is not shady. It is a well known project (LGPL-3.0, maintained by `rgaufman/live555`, last push July 2026). And Buildroot has a package for it with a verified hash:
+
+#### The headers are verified upstream code
+
+All 181 headers were compared against the `rgaufman/live555` Git mirror,
+which mirrors the official source. The blob is Live555 **2020.07.21**.
+
+```
+live.2020.04.24   175 of 181 headers byte identical
+                   6 differ, 4 of them only in the version string
+```
+
+The version files say `2020.07.21` instead of `2020.04.24`, which makes the
+blob one release newer than the compared commit. The other two differences
+are `liveMedia.hh`, an include list, and `ProxyServerMediaSession.hh`.
+
+**There is no injected code in the headers.** They are unmodified upstream
+Live555.
+
+#### The archives are not verifiable
+
+```
+$ ar t lib/libUsageEnvironment.a
+UsageEnvironment.o
+HashTable.o
+strDup.o
+
+$ strings lib/libUsageEnvironment.a | grep GCC
+GCC: (Xuantie-900 linux-5.10.4 musl gcc Toolchain V2.6.1 B-20220906) 10.2.0
+```
+
+Compiled objects, no source. Built with the Sophgo cross compiler, not with
+the upstream build. The source is identifiable and matches upstream, but the
+compiled artifacts cannot be checked against a reference build without
+reproducing the vendor toolchain.
+
+#### The Buildroot package needs a fix
+
+Live555 itself is not shady. It is a well known project (LGPL-3.0, mirrored
+at `rgaufman/live555`, last push July 2026). And Buildroot has a package for
+it:
 
 ```
 package/live555/live555.mk:
-  LIVE555_VERSION = 2025.10.13
-  LIVE555_SITE = https://download.videolan.org/contrib/live555
+  LIVE555_VERSION = 2021.05.03
+  LIVE555_SITE = http://www.live555.com/liveMedia/public
   LIVE555_LICENSE = LGPL-3.0+
+  live555.hash: md5 + sha256
 ```
+
+The problem is that the official site no longer serves the tarballs:
+
+```
+http://www.live555.com/liveMedia/public/live.2021.05.03.tar.gz   404
+http://www.live555.com/liveMedia/public/live.2020.05.21.tar.gz   404
+http://www.live555.com/liveMedia/public/live.2025.10.13.tar.gz   404
+```
+
+The homepage loads, the `public/` directory does not. The package has to
+switch to a Git clone against the mirror with a pinned commit.
 
 **Recommendation:** build live555 from source with the Buildroot package and point `cvi_rtsp` at it. The `cvi_rtsp` build already supports this, its `build.sh` looks for `LIVE555_DIR` first and only falls back to the download:
 
@@ -297,7 +349,7 @@ if [ "${LIVE555_DIR}" = "" ]; then
 fi
 ```
 
-So the switch is: set `LIVE555_DIR` to the Buildroot build and the blob is never fetched. The Buildroot package installs the same four static libraries plus `liveMediaServer`, so the `Makefile.inc` paths work unchanged.
+So the switch is: set `LIVE555_DIR` to the Buildroot build and the blob is never fetched. The Buildroot package installs the same four static libraries plus `live555MediaServer`, so the `Makefile.inc` paths work unchanged.
 Two details to get right in the build:
 
 - The Buildroot package builds with `BR2_STATIC_LIBS=y` into
@@ -324,10 +376,14 @@ Mostly fine. Classified by content:
 | `stb` | 82 | 0 | source |
 | `googletest` | 148 | 0 | source |
 | `json-c`, `nlohmannjson`, `glog`, `nanomsg`, `uv`, `zlib`, `miniz`, `sqlite3`, `thttpd`, `flatbuffers` | source | | fine |
-| `live555` | 1 | 4 | **blob** |
+| `live555` | 181 headers | 4 archives | **blob** |
 | `opencv_aisdk` | 0 | 0 | **blob** |
 
 Only live555 and opencv_aisdk are real blobs. The rest ship the source and build it.
+
+The live555 headers were verified against the upstream source and are
+unmodified. The four archives are compiled objects without source, built
+with the vendor toolchain, so they do not count as verifiable.
 
 ### The reCamera.zip
 

@@ -49,7 +49,13 @@ What a port to 6.4 or 7.x would cost is in [kernel-upgrade.md](./kernel-upgrade.
 | `opencv4`, `opencv4-contrib` | Only used by the sscma stack | Goes with it. |
 | FreeRTOS stack | `freertos`, `FreeRTOS-Kernel`, `Lab-Project-FreeRTOS-POSIX` | Runs on the second core, nothing uses it. The forks are two years behind upstream. |
 | TPU stack | `cviruntime`, `cvikernel`, `cvimath`, `cvibuilder`, `cnpy`, `tdl_sdk`, `flatbuffers` | The AI accelerator SDK. A camera does not need it. |
-| `live555.tar.gz` blob | Prebuilt live555 binaries | Live555 is LGPL-3.0 and Buildroot has a package for it. Build from source. |
+| `live555.tar.gz` blob | Prebuilt live555 libraries | The headers are unmodified upstream, but the four archives are compiled objects built with the vendor toolchain and without source. Live555 is LGPL-3.0, build it from source. |
+
+### What comes in that was not in the upstream image
+
+| Part | What it is | Why it comes in |
+|---|---|---|
+| `onvifd` | The ONVIF daemon | Extracted from the vendor stack, where it exists as 1267 lines of Apache-2.0 code inside the Node-RED node binary. It needs no new dependency, libhv and OpenSSL are already in the image. See [onvif.md](./onvif.md). |
 
 ### Bluetooth: a hardware question
 
@@ -70,6 +76,40 @@ Two kinds of packages:
 - `sscma-supervisor`, `sscma-node`, `bt-init`, `morse_cli`, `wpa_supplicant_s1g`
 build from the `sscma-example-sg200x` git repo
 - `reCamera` unpacks a prebuilt zip
+
+### Which packages are in the image
+
+This is the mechanism that decides it. The external packages are not listed
+in the buildroot defconfig, they are enabled by their own `Config.in`
+default:
+
+| Package | Default | In the minimal image |
+|---|---|---|
+| `bt-init` | `default y` | no |
+| `libhv` | `default y` | yes, the ONVIF daemon needs it |
+| `libxcrypt-dev` | none | no |
+| `morse_cli` | `default y` | depends on the HaLow decision |
+| `opencv4` | none | no |
+| `opencv4-contrib` | none | no |
+| `reCamera` | `default n` | no |
+| `sscma-node` | `default y` | no |
+| `sscma-supervisor` | `default y` | no |
+| `wpa_supplicant_s1g` | `default y` | depends on the HaLow decision |
+
+So the trimming is done by flipping the `default` in the `Config.in` of the
+minimal external tree, not by editing the buildroot defconfig.
+
+Two side effects to know about. `sscma-node` selects `mosquitto`, `libhv`,
+`alsa-lib` and `alsa-utils` in its `Config.in`, so dropping it drops those
+as well. And `libhv` has to stay even though `sscma-node` goes, because the
+ONVIF daemon uses it.
+
+The buildroot defconfig itself is `external/buildroot/configs/cvitek_CV181X_musl_riscv64_defconfig`, 572 lines with 115 enabled packages. It is derived from the chip and the SDK version, not from the project:
+
+```
+build/envsetup_soc.sh:882
+  export BR_DEFCONFIG=${BR_BOARD}_defconfig
+```
 
 The init scripts come from two places: the packages copy their own rootfs into the target, and `external/ramdisk/rootfs/overlay/` holds the boot overlay.
 The overlay sets up the writable root: `/bin`, `/etc`, `/home`, `/lib`, `/opt`, `/root`, `/sbin`, `/usr` and `/var` are mounted as overlayfs with the lower layer in the read only rootfs and the upper layer in the userdata partition. That is also where the factory reset and the OTA update live.
@@ -93,8 +133,23 @@ The full evidence is in [submodule-review.md](./submodule-review.md).
 
 ## Build
 
-```bash
-./docker_build.sh sg2002_recamera_minimal
+The build goes through the GitHub workflow, not through Docker.
+
 ```
+.github/workflows/main.yml
+  runs-on: ubuntu-24.04
+  run: make ${{ matrix.target }}
+```
+
+The workflow installs the build dependencies with apt and calls `make`
+directly. The riscv64-musl toolchain and the ccache directory are cached
+between runs, so a rebuild only compiles what changed.
+
+The workflow needs two additions for the minimal target: a matrix entry and
+a `push` trigger on `develop`. Right now it only runs on a tag push or a
+manual dispatch.
+
+Locally, the Docker daemon does not run on this machine and systemd is
+offline, so `docker_build.sh` does not work here. The workflow does.
 
 Output lands in `output/sg2002_recamera_minimal/install/soc_sg2002_recamera_minimal/`.
