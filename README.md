@@ -41,6 +41,14 @@ Troubleshooting:
 
 ### 2.2 Build in Dev Containers
 
+The devcontainer is the local build path. It carries the riscv-collab toolchain that the cross-compiled Node.js needs, and it clones the `host-tools` submodule with the cvitec cross compiler.
+
+```bash
+code --folder . --dev-container
+```
+
+The base image is Debian 13 (trixie). The riscv-collab toolchain is a normal x86-64 glibc program and links against `GLIBC_2.38`, so it needs a newer glibc than Debian 12 has.
+
 Please refer to [Dev Containers](https://marketplace.visualstudio.com/items?itemName=ms-vscode-remote.remote-containers) for more details.
 
 ### 2.3 Build in Host

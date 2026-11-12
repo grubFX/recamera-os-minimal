@@ -70,7 +70,7 @@ The build environment on this machine:
 | Rootless Docker | `dockerd-rootless.sh`, `rootlesskit` and `slirp4netns` are all present, and `XDG_RUNTIME_DIR` is set. |
 | Disk | The workspace sits on an ext4 partition with 440 GB free. |
 | Host toolchain | Incomplete. `dtc`, `squashfs-tools`, `flex`, `bison`, `mtools` and `libssl-dev` are missing, and the host has gcc 15 where the build expects gcc 11. |
-| Conclusion | The build goes through CI. |
+| Conclusion | The build goes through CI, or in the devcontainer. |
 
 ### The build path is CI, not Docker
 
@@ -93,6 +93,30 @@ Two other things the CI gives for free:
 
 - The Node.js build is the expensive part. The comment in the workflow says "V8/nodejs compile alone needs ~4.5h on a 4-core runner". The minimal image has no Node.js, so the build is much faster.
 - The toolchain cache is keyed on `riscv64-musl-gcc-ubuntu-24.04-2026.10.21` and does not depend on the target, so the minimal build reuses it.
+
+### The devcontainer is the local build path
+
+The CI stays the reference, but a local build is now possible in the devcontainer. It needed three things that were not there:
+
+| Missing | What it does | Where it comes from |
+|---|---|---|
+| The cvitec riscv64 musl toolchain | The cross compiler for the target | The `host-tools` submodule, cloned by the `postCreateCommand` |
+| The riscv-collab toolchain | The C++20 compiler for the cross-compiled Node.js | Downloaded into the image at `/opt/toolchains/riscv64-musl` |
+| `xz-utils` | To unpack the toolchain | A package in the image |
+
+The base image is **Debian 13 (trixie)**. The reason is the riscv-collab toolchain: it is a normal x86-64 glibc program and it links against `GLIBC_2.38`. Debian 12 has glibc 2.36 and would not run it, Debian 13 has glibc 2.41.
+
+```
+$ docker run --rm buildpack-deps:trixie-curl ldd --version | head -1
+ldd (Debian GLIBC 2.41-12+deb13u4) 2.41
+```
+
+NodeSource does not publish a trixie repository, so the container uses the distro `nodejs` package. That is not a problem for the build: the Node.js in the camera image is cross-compiled by `nodejs.mk` from source, and the npm that installs node-red is the `host-nodejs` package that Buildroot builds itself.
+
+```
+external/buildroot/package/nodejs/nodejs.mk
+NPM = $(NODEJS_BIN_ENV) $(HOST_DIR)/bin/npm
+```
 
 ### Step 0.2: Baseline inventory
 
@@ -553,9 +577,9 @@ That binary has to be installed too, otherwise the server does not start.
 | | |
 |---|---|
 | Goal | The camera is not reachable with a password, only with a key. |
-| Change | In `external/buildroot/board/cvitek/CV181X/overlay/etc/ssh/sshd_config`, set `PasswordAuthentication no` and `PermitEmptyPasswords no`. |
+| Change | In `external/buildroot/board/cvitek/CV181X/overlay/etc/ssh/sshd_config`, set `PasswordAuthentication no` and `PermitEmptyPasswords no`. `PermitRootLogin` goes from `yes` to `no`. |
 | Check | `ssh -o PreferredAuthentications=password` fails, and key authentication works. |
-| Detail | The overlay currently ships `PermitRootLogin yes` with the password lines commented out, which means the default is "yes" for both. Root itself is not reachable, the Buildroot config sets `BR2_TARGET_ENABLE_ROOT_LOGIN=n`, but the `recamera` user has no password. |
+| Detail | The overlay shipped `PermitRootLogin yes` with the password lines commented out, which means the default was "yes" for both. Root itself was not reachable, the Buildroot config sets `BR2_TARGET_ENABLE_ROOT_LOGIN=n`, but the `recamera` user has no password. |
 | Note | This is the mitigation that removes the attack surface, independent of the version. A camera on a PoE network that is reachable from the internet should not have password authentication on at all. |
 
 ## Step 5: Trim the boot overlay

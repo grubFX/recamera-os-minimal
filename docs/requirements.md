@@ -152,16 +152,18 @@ $ echo "muRIcgkM8vBrPPn/FH5/FvMJZxNAdj7S+ZJIOYrinVs=" | base64 -d | xxd -p
 9ae44872090cf2f06b3cf9ff147e7f16f309671340763ed2f99248398ae29d5b
 ```
 
-There is a second mitigation, and it is worth doing regardless of the version: **the camera does not need password authentication at all.** The overlay ships `PermitRootLogin yes` with the password authentication lines commented out, which means the default is "yes" for both:
+**Status: implemented, not yet built and tested on the camera.** The package is bumped in `external/buildroot/package/openssh/`, and the hash is pinned.
+
+There is a second mitigation, and it is worth doing regardless of the version: **the camera does not need password authentication at all.** The overlay shipped `PermitRootLogin yes` with the password authentication lines commented out, which means the default was "yes" for both:
 
 ```
 external/buildroot/board/cvitek/CV181X/overlay/etc/ssh/sshd_config
-32:PermitRootLogin yes
-57:#PasswordAuthentication yes
-58:#PermitEmptyPasswords no
+PermitRootLogin yes
+#PasswordAuthentication yes
+#PermitEmptyPasswords no
 ```
 
-Root itself is not reachable, the Buildroot config takes the root password away and disables the root login:
+Root itself was not reachable, the Buildroot config takes the root password away and disables the root login:
 
 ```
 external/buildroot/configs/cvitek_CV181X_musl_riscv64_defconfig
@@ -169,14 +171,14 @@ external/buildroot/configs/cvitek_CV181X_musl_riscv64_defconfig
 206:BR2_TARGET_GENERIC_ROOT_PASSWD=""
 ```
 
-The user account in the image is `recamera`, with no password set:
+But the user account in the image is `recamera`, with no password set:
 
 ```
 external/buildroot/board/cvitek/CV181X/users_table.txt
 recamera  -1  recamera  -1  =recamera  /home/recamera  /bin/sh  i2c,spi,led,gpio,input,dialout,audio
 ```
 
-The `-1` in the password column means "no password". With the CVE, a 256 to 1024 character password would have been accepted for that account. A camera on a PoE network that is reachable from the internet with password authentication enabled is the exact scenario of the CVE. Turning the password authentication off and using key authentication removes the attack surface entirely, and it is one line in `sshd_config`.
+The `-1` in the password column means "no password". With the CVE, a 256 to 1024 character password would have been accepted for that account. A camera on a PoE network that is reachable from the internet with password authentication enabled is the exact scenario of the CVE. Turning the password authentication off and using key authentication removes the attack surface entirely, and it is three lines in `sshd_config`.
 
 ## 8. Everything is committed and pushed
 
