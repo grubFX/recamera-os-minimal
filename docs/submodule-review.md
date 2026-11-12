@@ -157,6 +157,20 @@ Every call is the two argument form `class_create(THIS_MODULE, name)`, which
 was removed in kernel 6.4. Porting the camera drivers to a 6.4+ kernel means
 going through all of `osdrv/interdrv` and fixing the API breaks.
 
+Two more version facts, so the list is complete:
+
+- **`set_fs()`** is an architecture implementation on RISC-V in
+  `arch/riscv/include/asm/uaccess.h`. It is gone from 6.1 on. There are 174
+  call sites in `osdrv`, but 173 of them are in old WiFi driver trees for
+  chips the camera does not have. One is in the camera path.
+- **`clk_hw_register_clkdev()`** is *not* removed. It is still declared in
+  `include/linux/clkdev.h` with an unchanged signature, all the way up to
+  v7.3. The CVI clock driver uses it, the modernized 6.18 driver uses
+  `devm_clk_hw_register` instead. That is a cleanup, not a port.
+
+The full breakdown with the numbers is in
+[kernel-upgrade.md](./kernel-upgrade.md).
+
 ### What the newer Sophgo kernels have
 
 | Kernel | Version | CVI video drivers | State |

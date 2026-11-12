@@ -105,29 +105,44 @@ osdrv/interdrv/cvi_vc_drv/vcodec/vdi/linux/vdi_osal.c
 
 in a file close path. Replacing it is a one line change.
 
-### 3. `clk_hw_register_clkdev()`, removed in 6.5
+### 3. The clock driver uses the clkdev API
 
-This one is in the kernel tree, not in `osdrv`:
+This one looked like a blocker at first and turned out not to be one.
+
+The CVI clock driver registers its clocks the old way:
+
+```c
+clk_hw_register(NULL, hw);
+clk_hw_register_clkdev(hw, cv180x_clk->name, NULL);
+```
+
+14 call sites in 9.276 lines of clock driver code.
+
+`clk_hw_register_clkdev` is **not** removed. It is still declared in
+`include/linux/clkdev.h` with the same signature, all the way up to v7.3:
 
 ```
-$ grep -rc clk_hw_register_clkdev linux_5.10/drivers/clk/cvitek/*.c
-linux_5.10/drivers/clk/cvitek/clk-cv180x.c: 3
-linux_5.10/drivers/clk/cvitek/clk-cv181x.c: 5
-linux_5.10/drivers/clk/cvitek/clk-cv182x.c: 3
-linux_5.10/drivers/clk/cvitek/clk-cv1835.c: 3
+$ grep -c clk_hw_register_clkdev v7.3:include/linux/clkdev.h
+2
 ```
 
-14 call sites in 9.276 lines of clock driver code. The function is gone in
-6.1 already:
+The signature is unchanged since 5.10:
 
+```c
+int clk_hw_register_clkdev(struct clk_hw *hw, const char *dev_id, const char *con_id);
 ```
-$ grep -c clk_hw_register_clkdev v6.1:include/linux/clk.h
-0
-$ grep -c clk_hw_register_clkdev v7.3:include/linux/clk.h
-0
+
+What the modernized 6.18 driver does differently is use the managed variant:
+
+```c
+ret = devm_clk_hw_register(dev, hw);
 ```
+
+So this is a cleanup, not a port. The driver builds against a 6.x kernel with
+the old API as well.
 
 ### 4. The CV181X DMA controller
+
 
 ```
 linux_5.10/drivers/dma/cvitek/   1 file, 2.200 lines
@@ -255,7 +270,7 @@ Rough order of magnitude, for someone who does this kind of work:
 |---|---|---|
 | `class_create` migration | 5 call sites | Mechanical, an hour |
 | `set_fs` removal | 1 call site | Mechanical |
-| Clock driver to 6.5+ | 9.276 lines | The `clkdev` path has to be replaced with the `devm_` path. The modernized Sophgo version shows how, and Mainline has it already. |
+| Clock driver | 9.276 lines | The old clkdev API still compiles in 7.3. Optional to move to `devm_clk_hw_register`. |
 | DMA driver | 2.200 lines | It is the Synopsys DesignWare AHB DMA, Mainline has `drivers/dma/dw/`. The CVI delta is the channel count and the quirks. |
 | Scheduler patch | 100 lines | Rewrite for EEVDF, and check whether the pinning is still needed at all |
 | `osdrv` API fixes | unknown until compiled | The compiler finds these one at a time |
