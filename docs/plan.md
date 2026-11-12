@@ -412,5 +412,9 @@ good state.
   region and fast_image parts of the video pipeline.
 - Can the Docker daemon be started on this machine? The build needs it, and
   there is no sudo.
+- Is a kernel port to 6.4 or 7.x wanted later? It is not a step in this plan,
+  it is its own project. The breakdown is in
+  [kernel-upgrade.md](./kernel-upgrade.md).
+
 
 

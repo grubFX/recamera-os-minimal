@@ -200,8 +200,22 @@ ret = devm_clk_hw_register(dev, hw);
 instead of the removed `clk_hw_register_clkdev`. It is built against the
 CV1800 and CV181x clock trees.
 
-So the SoC support for a modern kernel exists and is maintained. What does
-not exist is the camera part.
+And Mainline has the same, which is the better starting point:
+
+```
+arch/riscv/boot/dts/sophgo/sg2002.dtsi
+drivers/pinctrl/sophgo/pinctrl-sg2002.c
+drivers/clk/sophgo/clk-cv1800.c
+sound/soc/sophgo/cv1800b-sound-dac.c
+sound/soc/sophgo/cv1800b-sound-adc.c
+drivers/mmc/host/sdhci-of-dwcmshc.c
+Documentation/devicetree/bindings/mailbox/sophgo,cv1800b-mailbox.yaml
+```
+
+So the SoC support for a modern kernel exists, is maintained and is upstream.
+What does not exist is the camera part. Mainline has seven references to
+CV181X and every one of them is SoC level.
+
 
 ## What a port would actually cost
 
@@ -211,20 +225,38 @@ Rough order of magnitude, for someone who does this kind of work:
 |---|---|---|
 | `class_create` migration | 5 call sites | Mechanical, an hour |
 | `set_fs` removal | 1 call site | Mechanical |
-| Clock driver to 6.5+ | 9.276 lines | The `clkdev` path has to be replaced with the `devm_` path. The modernized Sophgo version shows how. |
+| Clock driver to 6.5+ | 9.276 lines | The `clkdev` path has to be replaced with the `devm_` path. The modernized Sophgo version shows how, and Mainline has it already. |
 | DMA driver | 2.200 lines | Has to be ported or written against the new DMA API |
 | Scheduler patch | 100 lines | Rewrite for EEVDF, and check whether the pinning is still needed at all |
 | `osdrv` API fixes | unknown until compiled | The compiler finds these one at a time |
-| Bootloader | unknown | U-Boot 2021.10 and OpenSBI v1.2 have their own deltas, and there is no 6.x variant with the CV181X support |
+| Bootloader | moderate | U-Boot and OpenSBI have their own deltas. Mainline U-Boot has the SG2002 device trees, so the board support can move there. |
 
 And then the part that decides everything: **there is no upstream to merge
 into.** The CV181X video drivers exist in one vendor tree, written for one
 kernel version. Nobody else maintains them. A port is not a contribution, it
 is a fork that only exists in this repository.
 
+## The realistic path, if it is ever needed
+
+Not a rewrite from 5.10, but a move onto what already exists:
+
+1. Start from Mainline, or from `sophgo/linux-riscv` at 6.18. Both have the
+   SoC support: `sg2002.dtsi`, `clk-cv1800.c`, `pinctrl-sg2002.c`, the sound
+   codec drivers, the SDHCI host and the mailbox binding.
+2. Move the board device tree. The reCamera board DTS lives in
+   `external/build/boards/cv181x/sg2002_recamera_emmc/dts_riscv/` and only
+   needs to be rewritten on top of the Mainline `sg2002.dtsi`.
+3. Port the DMA driver. It is the smallest piece that has no successor
+   anywhere, 2.200 lines.
+4. Use the modernized clock driver instead of the 5.10 one.
+5. Fix `osdrv` against the compiler. It is a known finite set of API breaks.
+6. Decide about the scheduler patch, and whether the priority pinning is
+   still wanted at all.
+7. Move U-Boot to a version with the SG2002 device trees.
+
 ## The honest recommendation
 
-For a camera that should do one thing, the effort is not justified.
+For a camera that should do one thing, the effort is not justified now.
 
 The kernel gets weekly stable releases with the upstream security fixes. The
 packages that a network can reach, dropbear, busybox and openssl, are the
@@ -234,14 +266,7 @@ port.
 The one thing worth doing is keeping the fork up to date with the weekly
 stable releases. That is already the case.
 
-If the kernel version becomes a requirement later, the realistic path is not
-6.x from scratch but:
+If the kernel version becomes a requirement later, the path is the one above:
+move onto Mainline or the 6.18 Sophgo tree, port the DMA driver, fix `osdrv`.
 
-1. Start from `sophgo/linux-riscv` at 6.18, it has the SoC support
-2. Port the DMA driver, it is the smallest piece that has no successor
-3. Use the modernized `clk-cv1800.c` instead of the 5.10 clock driver
-4. Fix `osdrv` against the compiler, it is a known finite set of API breaks
-5. Decide about the scheduler patch, and whether the priority pinning is
-   still wanted
 
-That is a project of its own, not a step in the minimal OS plan.
