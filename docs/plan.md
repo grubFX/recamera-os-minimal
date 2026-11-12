@@ -174,10 +174,12 @@ the BCM firmware at boot, which is the part that goes.
 | | |
 |---|---|
 | Goal | No prebuilt binaries in the image. |
-| Change | Enable `BR2_PACKAGE_LIVE555` in the minimal external tree. Point the `cvi_rtsp` build at the result instead of the tarball. |
-| Check | The image contains the live555 libraries and they were built from the Buildroot package, not copied from `oss/`. |
+| Change | Enable `BR2_PACKAGE_LIVE555` with `BR2_STATIC_LIBS=y` in the minimal external tree. Point the `cvi_rtsp` build at the result instead of the tarball. |
+| Check | The image contains the four live555 static libraries and they were built from the Buildroot package, not copied from `oss/`. |
 | Note | `cvi_rtsp/build.sh` only downloads the tarball when `LIVE555_DIR` is empty. Set it and the download never happens. The Buildroot package is version 2025.10.13, LGPL-3.0, with a checked hash. |
-| Risk | The include and library paths have to line up. If they do not, the `cvi_rtsp` build fails with a missing header. That is a build failure, not a silent problem. |
+| Detail | `cvi_rtsp/Makefile.inc` expects four static archives under `$(LIVE555_DIR)/lib/` and the headers in four separate include directories. The Buildroot layout has the headers in one directory, so `LIVE555_INC` has to be adjusted. |
+| Risk | If the paths do not line up, the `cvi_rtsp` build fails with a missing header. That is a build failure, not a silent problem. |
+
 
 ### Step 3.8: Drop the TPU stack
 
@@ -257,9 +259,27 @@ This is the first step where the result is visible.
 | | |
 |---|---|
 | Goal | A stream that a player can open. |
-| Change | An init script that starts `cvi_rtsp` with a config for the sensor and one stream. |
+| Change | An init script that starts the RTSP server with a config for the sensor and one stream. |
 | Check | The process is running and the config file is in the image. |
-| Note | `cvi_rtsp` has its own build in `external/setenv.sh` (`build_cvi_rtsp`). It needs `live555` from `oss/oss_release_tarball/musl_riscv64/live555.tar.gz`. |
+| Note | `cvi_rtsp` is not a Buildroot package and it does not build a server binary. It builds two libraries, `libcvi_rtsp.so` and `libcvi_rtsp_service.so`. The server class is `CVI_RTSP`, it inherits from the Live555 `RTSPServer`. |
+| Note | `cvi_rtsp/example/rtsp_server_video.cpp` is a complete standalone server application, already in the repo. It initializes the sensor, the VI, the VPSS and the encoder and then serves the stream. This is the base for the minimal image. |
+| Note | The build goes through `build_cvi_rtsp` in `external/setenv.sh` and lands in `${SYSTEM_OUT_DIR}/usr`, which is `/mnt/system/usr` at runtime. |
+| Note | `cvi_rtsp/build.sh` uses `LIVE555_DIR` when it is set and only downloads the tarball otherwise. Step 3.7 sets it. |
+
+The example programs are not built by default. `cvi_rtsp/Makefile` only adds them
+when `BUILD_EXAMPLE=1`:
+
+```make
+ifeq ($(BUILD_EXAMPLE),1)
+SUBDIR += example
+endif
+```
+
+So the minimal image needs `BUILD_EXAMPLE=1`, or a new buildroot package that
+builds the server from `example/rtsp_server_video.cpp`.
+
+
+
 
 ### Step 5.2: A minimal config for the stream
 

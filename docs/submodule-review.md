@@ -251,8 +251,25 @@ $ tar tzf live555.tar.gz | wc -l
 230
 ```
 
-230 files, one header, no source. The `cvi_rtsp` server links against these
-prebuilt libraries.
+The four static libraries are exactly what the RTSP server links against:
+
+```
+lib/libliveMedia.a
+lib/libBasicUsageEnvironment.a
+lib/libUsageEnvironment.a
+lib/libgroupsock.a
+```
+
+and `cvi_rtsp/Makefile.inc` expects them:
+
+```make
+LIVE555_DIR ?= /system
+LIVE555_LIB ?= $(LIVE555_DIR)/lib/libliveMedia.a $(LIVE555_DIR)/lib/libBasicUsageEnvironment.a \
+               $(LIVE555_DIR)/lib/libUsageEnvironment.a $(LIVE555_DIR)/lib/libgroupsock.a
+```
+
+The tarball also carries `bin/live555MediaServer`, the generic RTSP server that
+`cvi_rtsp` builds on.
 
 Live555 itself is not shady. It is a well known project (LGPL-3.0, maintained
 by `rgaufman/live555`, last push July 2026). And Buildroot has a package for
@@ -276,7 +293,21 @@ fi
 ```
 
 So the switch is: set `LIVE555_DIR` to the Buildroot build and the blob is
-never fetched.
+never fetched. The Buildroot package installs the same four static libraries
+plus `liveMediaServer`, so the `Makefile.inc` paths work unchanged.
+
+Two details to get right in the build:
+
+- The Buildroot package builds with `BR2_STATIC_LIBS=y` into
+  `linux` config, with `linux-with-shared-libraries` otherwise. The
+  `cvi_rtsp` Makefile expects static archives, so `BR2_STATIC_LIBS=y`.
+- The Buildroot package installs to the sysroot, the tarball installs to
+  `/system`. `LIVE555_DIR` has to point at the right place, and
+  `LIVE555_INC` uses `include/BasicUsageEnvironment`, `include/groupsock`,
+  `include/liveMedia` and `include/UsageEnvironment` as separate include
+  directories. The Buildroot layout has them in one `include` directory, so
+  `LIVE555_INC` needs adjusting.
+
 
 ### opencv_aisdk.tar.gz: binaries
 
@@ -327,6 +358,24 @@ upstream build either.
 
 **Recommendation:** remove it. It carries the web UI and the device manager,
 not the camera.
+
+### The one local patch
+
+`external/cvi_rtsp/patches/` holds a single patch, applied by `external/setenv.sh`
+before the build:
+
+```
+0001-emit-H264-sprop-parameter-sets-in-SDP.patch
+```
+
+It adds the H264 SPS and PPS parameter sets to the SDP, so that a client can
+decode the stream without a separate request. The patch is well written and
+documented, it explains the Annex-B parsing in the comment.
+
+This is a local patch, not upstream code. It is a good one and it is needed for
+the RTSP server to work with normal players. Two options: keep it as a patch,
+or send it upstream to `sophgo/cvi_rtsp`. Keeping it as a patch is fine, the
+patch is in the repo and readable.
 
 ## The TPU stack
 
