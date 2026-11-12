@@ -84,6 +84,33 @@ So both radios go, together with their packages, their kernel modules and their 
 
 Bluetooth goes with it, `bt-init` and `bluez5_utils`.
 
+The vendor kernel builds the wireless frame itself in, so the board defconfig has to turn the whole subtree off. The vendor tree defaults `CONFIG_WLAN`, `CONFIG_CFG80211`, `CONFIG_MAC80211` and every `CONFIG_WLAN_VENDOR_*` to `y`, so switching off only the radio chips is not enough, the frame comes back with them:
+
+```
+external/build/boards/cv181x/sg2002_recamera_emmc/linux/cvitek_sg2002_recamera_emmc_defconfig
+  # CONFIG_WLAN is not set
+  # CONFIG_CFG80211 is not set
+  # CONFIG_MAC80211 is not set
+  # CONFIG_RFKILL is not set
+  # CONFIG_WLAN_VENDOR_REALTEK is not set
+  ...
+  # CONFIG_CVI_WIFI_PIN is not set
+```
+
+`CONFIG_CVI_WIFI_PIN` is the driver that hands out the GPIO of the wifi power and wakeup pin. Without a radio there is no pin to hand out.
+
+The wifi userspace package goes with it. The vendor keeps it in a separate
+package that the board defconfig switches on:
+
+```
+external/build/boards/cv181x/sg2002_recamera_emmc/sg2002_recamera_emmc_defconfig
+  # CONFIG_TARGET_PACKAGE_WIFI is not set
+```
+
+It brings `wpa_supplicant`, `hostapd` and the matching configuration files
+in `/etc`. The Bluetooth package and the vendor wifi chip packages are off
+already.
+
 What HaLow is, for the record: 802.11ah, the WiFi successor to 802.11ac, designed for long range and low power. It runs in the sub-GHz band, so the range is in kilometres rather than metres. It is the right radio for a camera that reports over a long link, and the wrong radio for a camera that hangs on a PoE switch.
 
 The network is Ethernet, and the Ethernet driver is built into the kernel, not a module:
@@ -202,3 +229,55 @@ The workflow needs two additions for the minimal target: a matrix entry and a `p
 Locally, the Docker daemon does not run on this machine and systemd is offline, so `docker_build.sh` does not work here. The workflow does.
 
 Output lands in `output/sg2002_recamera_minimal/install/soc_sg2002_recamera_minimal/`.
+
+### Host tools that Debian 13 does not ship
+
+Two host tools are needed to pack the partitions, and Debian 13 (trixie) does
+not have them in the archive:
+
+| Tool | Why | Where it comes from |
+|---|---|---|
+| `make_ext4fs` | Packs the `data`, `system` and `rootfs` partitions | Prebuilt in `build/tools/common/prebuild/`. It needs `libpcre.so.3`, so `libpcre3` has to be installed. Debian 13 dropped PCRE1, the package is taken from the Debian pool by the devcontainer `Dockerfile`. |
+| `resize2fs` | Shrinks the ext4 image to its minimum size | `e2fsprogs`, which is in the Debian archive. |
+
+The devcontainer `Dockerfile` installs both, so a fresh container builds
+without manual steps.
+
+### Package versions that the board pins
+
+Two packages in the Buildroot tree were updated because the newer versions
+of their dependents need them:
+
+| Package | Version | Why |
+|---|---|---|
+| `util-linux` | 2.36.2 | The Buildroot tree pins 2.36.2. It needs a patch for `<sys/pidfd.h>`, because the host glibc has the header and util-linux 2.36.2 does not know about it. The patch is in `external/buildroot/package/util-linux/`. |
+| `libubootenv` | v0.3.8 | `swupdate` 2026.05.1 calls `libuboot_read_config_ext()`, `libuboot_get_namespace()` and `libuboot_namespace_from_dt()`. The pinned commit only had `libuboot_read_config()` and `libuboot_getname()`, so swupdate did not link. The overlay is in `external/buildroot/package/libubootenv/`. |
+
+### The name of the root filesystem image
+
+The root filesystem is called `rootfs_ext4.emmc` everywhere in the board
+overlay: in the partition XML, in the two SD card scripts, in the
+`sw-description` of the OTA update and in the `upgrade.sh` that runs on the
+device. The build system however produced the image as `rootfs.emmc`.
+
+The vendor renamed its images in commit `46c6a37` ("build: weekly rls
+2025.12.17") and updated the partition XMLs that ship with it. The board
+overlay predates that rename, so the two sides disagreed about the name of
+the file and nothing reconciled them.
+
+The mismatch failed silently, in three places at once:
+
+| Consumer | What it does | Result |
+|---|---|---|
+| `raw2cimg.py` | Compares the file name it is called with against the partition name in the XML and packs only on a match | The root filesystem was left out of the flash image |
+| `mk_package.py` | Skips every partition whose file is missing | The `upgrade.zip` contained no root filesystem |
+| `gen_swu` in `external/build.sh` | Builds the `.swu` from the file list of the `sw-description` | The `.swu` was 2 KB and held only the description |
+
+`external/build/patches/0002-build-name-the-root-filesystem-image-rootfs_ext4.patch`
+renames the image in the build system, so that all six consumers agree on
+one name.
+
+> A symlink from `rootfs.emmc` to `rootfs_ext4.emmc` is not enough. The
+> packers compare the file *name*, and `cpio` archives a symlink as a link
+> instead of its contents, so the `.swu` would still be empty.
+
