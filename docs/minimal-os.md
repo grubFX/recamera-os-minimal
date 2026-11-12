@@ -1,11 +1,11 @@
 # Minimal reCamera OS
 
-Goal: a small, understandable image for the Seeed reCamera (SG2002 / CV181X). Kept:
+Goal: a small, understandable image for the Seeed reCamera HQ PoE (SG2002 / CV181X). Kept:
 
 - Camera: sensor, ISP, video encoding, RTSP
 - ONVIF, so the camera shows up in an NVR or VMS on its own
 - SSH
-- WiFi
+- Ethernet, the camera is powered over PoE
 - NTP
 
 Removed:
@@ -13,6 +13,8 @@ Removed:
 - Node-RED, dashboard, the MQTT broker
 - The sscma app layer (inference, supervisor, device manager)
 - Avahi, ttyd, dnsmasq, Bluetooth
+- The whole wireless stack, WiFi and HaLow
+- The battery sensor, the camera has no battery
 - The prebuilt `reCamera.zip` blob
 
 ## What the upstream image is made of
@@ -41,7 +43,12 @@ None of these are patches on top of upstream Linux. They are the vendor tree, an
 | `node-red` + dashboard | The flow editor and dashboard | Not wanted in a minimal image. |
 | `mosquitto` | Broker on 127.0.0.1 | Only used by the node-red and sscma stack. |
 | `avahi`, `dnsmasq`, `ttyd` | mDNS, DNS and the web terminal | Not needed. |
-| `bt-init`, `bluez5_utils` | Bluetooth init for the BCM chip | See below. |
+| `bt-init`, `bluez5_utils` | Bluetooth init for the BCM chip | The target has no radio at all, see below. |
+| `wpa_supplicant`, `wpa_supplicant_s1g`, `hostapd` | The wireless supervisors | No radio in the image. |
+| `iw`, `wireless_tools`, `wireless_regdb` | The wireless tools | No radio in the image. |
+| `morse_cli` | The HaLow CLI | The HaLow chip is not on the board. |
+| The wireless kernel modules | `brcmfmac.ko`, `dot11ah.ko`, `morse.ko` and their helpers | No radio in the image. |
+| The battery driver | `ti-ads1015.ko` and the `adc@48` device tree node | The camera is powered over PoE, there is no battery. |
 | `opencv4`, `opencv4-contrib` | Only used by the sscma stack | Goes with it. |
 | FreeRTOS stack | `freertos`, `FreeRTOS-Kernel`, `Lab-Project-FreeRTOS-POSIX` | Runs on the second core, nothing uses it. The forks are two years behind upstream. |
 | TPU stack | `cviruntime`, `cvikernel`, `cvimath`, `cvibuilder`, `cnpy`, `tdl_sdk`, `flatbuffers` | The AI accelerator SDK. A camera does not need it. |
@@ -53,20 +60,42 @@ None of these are patches on top of upstream Linux. They are the vendor tree, an
 |---|---|---|
 | `onvifd` | The ONVIF daemon | Extracted from the vendor stack, where it exists as 1267 lines of Apache-2.0 code inside the Node-RED node binary. It needs no new dependency, libhv and OpenSSL are already in the image. See [onvif.md](./onvif.md). |
 
-### Bluetooth: a hardware question
+### The wireless stack: no radio at all
 
-The reCamera board carries a Morse mm610x HaLow chip and a BCM43012 for 2.4/5 GHz WiFi. The `bt-init` package patches the BCM firmware at boot. Bluetooth is not needed for the camera, so the package goes, unless the WiFi chip turns out to need it. Bluetooth is only on the `w` variant of the core board. The C1-2002w carries the WiFi/Bluetooth module, the C1-2002 does not.
+The target is the reCamera HQ PoE. Its core board, the `C1-2002`, has no wireless module:
 
-HaLow is 802.11ah, the WiFi successor to 802.11ac, designed for long range and low power. It runs in the sub-GHz band, so the range is in kilometres rather than metres. That is the point of it: a camera that reports over a long link without asking for much power.
+```
+OSHW-reCamera-Series/hardware/recamera-2002/core/c1-2002/README.md
+  C1-2002    No wireless module; exposes additional SDIO/UART signals to the base
+  C1-2002w   Wi-Fi/Bluetooth module, onboard antenna, and I-PEX connector
+```
 
-The image carries drivers for both radios, and they are not two settings for the same radio. Which one stays depends on the board the target camera has:
+So both radios go, together with their packages, their kernel modules and their device tree nodes:
 
-| Radio | Standard | Kernel modules | Supervisor |
+| Radio | Standard | Kernel modules | Packages |
 |---|---|---|---|
-| Morse mm610x | 802.11ah, HaLow, sub-GHz | `dot11ah.ko`, `morse.ko` | `wpa_supplicant_s1g` |
-| Broadcom BCM43012 | 802.11ac, 2.4 and 5 GHz | `brcmfmac.ko` | `wpa_supplicant` |
+| Morse mm610x | 802.11ah, HaLow, sub-GHz | `dot11ah.ko`, `morse.ko`, `mac80211.ko`, `libarc4.ko`, `ctr.ko`, `ccm.ko`, `gcm.ko`, `crc7.ko` | `wpa_supplicant_s1g`, `morse_cli` |
+| Broadcom BCM43012 | 802.11ac, 2.4 and 5 GHz | `brcmfmac.ko`, `brcmutil.ko`, `cfg80211.ko` | `wpa_supplicant`, `hostapd`, `iw`, `wireless_tools` |
 
-The core board comes in two variants, `C1-2002` with no wireless module at all and `C1-2002w` with the WiFi/Bluetooth module onboard. The default for the minimal image is the BCM only, because a normal WiFi is what a laptop or a phone can join, and HaLow needs a special concentrator on the other side. The detail is in [requirements.md](./requirements.md), requirement 9.
+Bluetooth goes with it, `bt-init` and `bluez5_utils`.
+
+What HaLow is, for the record: 802.11ah, the WiFi successor to 802.11ac, designed for long range and low power. It runs in the sub-GHz band, so the range is in kilometres rather than metres. It is the right radio for a camera that reports over a long link, and the wrong radio for a camera that hangs on a PoE switch.
+
+The network is Ethernet, and the Ethernet driver is built into the kernel, not a module:
+
+```
+external/build/boards/cv181x/sg2002_recamera_emmc/linux/cvitek_sg2002_recamera_emmc_defconfig
+  CONFIG_STMMAC_ETH=y
+  # CONFIG_DWMAC_GENERIC is not set
+```
+
+So the camera keeps its network with a smaller image. The detail is in [requirements.md](./requirements.md), requirement 9, and in [plan.md](./plan.md), step 3.3.
+
+### The battery: none
+
+The HQ PoE draws its power over the Ethernet cable, 802.3af PoE Mode A. There is no battery in the product.
+
+The battery reading came from an ADC on I2C1, the `adc@48` node with `compatible = "ti,ads1015"` in the device tree. The node is deleted and `ti-ads1015.ko` is not loaded. The driver stays in the kernel, it is an upstream driver for the TI ADS1015 ADC and not vendor code, it is simply not used.
 
 ### The auto update
 
@@ -82,11 +111,12 @@ The detail that matters: the download URL in `upgrade.sh` points at the vendor r
 |---|---|
 | OTA update | yes, with the automatic polling removed |
 | Gimbal and PTZ | no |
-| Sensor | OV5647 |
+| Sensor | GC2053 |
 | Snapshot | yes |
-| Wireless | open, depends on the board, the default is the BCM only |
+| WiFi and HaLow | no |
+| Battery | no, the camera is powered over PoE |
 
-The reasoning behind each one is in [requirements.md](./requirements.md), requirement 9, and in full in [decisions.md](./decisions.md).
+The reasoning behind each one is in [requirements.md](./requirements.md), requirement 9, and in full in [plan.md](./plan.md).
 
 ## How the image is put together
 
@@ -102,20 +132,32 @@ This is the mechanism that decides it. The external packages are not listed in t
 
 | Package | Default | In the minimal image |
 |---|---|---|
-| `bt-init` | `default y` | no |
+| `bt-init` | `default y` | no, no radio and no Bluetooth |
 | `libhv` | `default y` | yes, the ONVIF daemon needs it |
 | `libxcrypt-dev` | none | no |
-| `morse_cli` | `default y` | depends on the HaLow decision |
+| `morse_cli` | `default y` | no, the HaLow chip is not on the board |
 | `opencv4` | none | no |
 | `opencv4-contrib` | none | no |
 | `reCamera` | `default n` | no |
 | `sscma-node` | `default y` | no |
 | `sscma-supervisor` | `default y` | no |
-| `wpa_supplicant_s1g` | `default y` | depends on the HaLow decision |
+| `wpa_supplicant_s1g` | `default y` | no, the HaLow chip is not on the board |
 
 So the trimming is done by flipping the `default` in the `Config.in` of the minimal external tree, not by editing the buildroot defconfig.
 
 Two side effects to know about. `sscma-node` selects `mosquitto`, `libhv`, `alsa-lib` and `alsa-utils` in its `Config.in`, so dropping it drops those as well. And `libhv` has to stay even though `sscma-node` goes, because the ONVIF daemon uses it.
+
+The Buildroot packages that go with the wireless decision are set in the buildroot defconfig, because they are normal Buildroot packages:
+
+```
+external/buildroot/configs/cvitek_CV181X_musl_riscv64_defconfig
+  BR2_PACKAGE_WPA_SUPPLICANT=y            goes
+  BR2_PACKAGE_HOSTAPD=y                   goes
+  BR2_PACKAGE_IW=y                        goes
+  BR2_PACKAGE_WIRELESS_TOOLS=y            goes
+  BR2_PACKAGE_WIRELESS_REGDB=y            goes
+  BR2_PACKAGE_BLUEZ5_UTILS=y              goes
+```
 
 The buildroot defconfig itself is `external/buildroot/configs/cvitek_CV181X_musl_riscv64_defconfig`, 572 lines with 115 enabled packages. It is derived from the chip and the SDK version, not from the project:
 

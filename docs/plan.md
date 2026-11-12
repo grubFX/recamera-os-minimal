@@ -2,6 +2,43 @@
 
 Every step has a goal, a concrete change and a way to check the result. The check is always a build, never the camera. The submodule review in [submodule-review.md](./submodule-review.md) is the evidence for the decisions below.
 
+## The target
+
+The reCamera HQ PoE. The SG2002 with the plain `C1-2002` core board and the `B301 PoE` base board.
+
+```
+OSHW-reCamera-Series/hardware/recamera-2002/products/hq-poe/README.md
+  SoC / memory      SG2002, 256MB
+  Sensor            GC2053, 1920x1080 at 30fps
+  Lens              Replaceable M12, default FOV about 90 degrees
+  Base              B301 PoE
+  Sensor board      S401 GC2053
+  Network / power   100Mbps Ethernet, 802.3af PoE Mode A
+  Expansion         UART, debug, and three GPIOs through the six-pin connector
+```
+
+That fixes the scope. The core board has no wireless module, so there is no WiFi and no HaLow. The camera is powered over the cable, so there is no battery. The product ships with the `S401 GC2053`, so that is the sensor.
+
+## The scope decisions
+
+These are decided. The steps below carry them inline with a `**Decision:**` marker.
+
+| Question | Decision | Step |
+|---|---|---|
+| OTA update | yes, with the automatic polling removed | 5.2 |
+| Gimbal | no | 7.9, dropped |
+| PTZ | no, it comes with the gimbal | 7.9, dropped |
+| Sensor | GC2053 | 3.9 |
+| Snapshot | yes | 7.8 |
+| WiFi | no | 3.3 |
+| HaLow | no | 3.3 |
+| Battery | no, the camera is powered over PoE | 3.3, 5.4 |
+| ONVIF events | no, without the AI stack there is no motion detection | 7, not in scope |
+
+The Docker daemon does not matter, the build goes through CI. The ONVIF port is 8899, the vendor default, and it does not collide with anything. The crypto library for ONVIF is OpenSSL, which is already in the image.
+
+Two questions are still open, they are at the end of this document.
+
 ## Baseline
 
 Build the upstream image first. Everything after that is compared against it.
@@ -165,7 +202,7 @@ The upstream defconfig is 32 lines and sets the project level: the chip, the boa
 CONFIG_CHIP_sg2002=y
 CONFIG_BOARD_recamera_emmc=y
 CONFIG_CROSS_COMPILE="riscv64-unknown-linux-musl-"
-CONFIG_SENSOR_OV_OV5647=y
+CONFIG_SENSOR_GCORE_GC2053=y
 CONFIG_STORAGE_TYPE_emmc=y
 ```
 
@@ -208,37 +245,70 @@ The supervisor is the one that matters most: it installs its own rootfs and star
 | Check | The inventory shows no mosquitto, no avahi, no ttyd. The build log has no error about a missing dependency. |
 | Note | Two packages in the Buildroot fork carry patches for packages a camera does not need: `freetype` and `zlog`. They go with the packages. `package/busybox/busybox.config` stays, it defines what the shell in the image can do. |
 
-### Step 3.3: Keep the wireless stack that the camera needs
+### Step 3.3: Drop the wireless stack completely
 
 | | |
 |---|---|
-| Goal | WiFi works, without dragging in Bluetooth. |
-| Change | Keep the WiFi kernel modules and the matching wpa_supplicant. Remove `bt-init` and `bluez5_utils`. |
-| Check | The init script `loadsystemko.sh` loads the radio modules for the board the camera has, and the init script starts the matching supervisor. |
-| Note | **Open.** Which radio the image keeps depends on the board. See below. |
+| Goal | No radio in the image. The camera is on Ethernet. |
+| Change | Remove the wireless kernel modules, the wireless packages and the wireless device tree nodes. See the list below. |
+| Check | The init script loads no radio module. The image has no `wpa_supplicant`, no `hostapd` and no `iw`. The device tree has no `mm610x_sdio` and no `wifi_pin`. |
+| Note | **Decision: no WiFi, no HaLow.** The target is the HQ PoE variant, which is the plain `C1-2002` core board. That board has no wireless module at all, the PoE base board connects over Ethernet. |
 
-Bluetooth is only on the `w` variant of the core board. The C1-2002w carries the WiFi/Bluetooth module, the C1-2002 does not. The `bt-init` package patches the BCM firmware at boot, which is the part that goes.
-
-#### The two radios
-
-The image carries drivers for two radios, they are not two settings for the same radio:
-
-| Radio | Standard | Driver | Kernel module | Supervisor |
-|---|---|---|---|---|
-| Morse mm610x | 802.11ah, the HaLow band, sub-GHz, kilometres of range | vendor tree in `external/linux/drivers/fgh100m/` | `dot11ah.ko`, `morse.ko` | `wpa_supplicant_s1g` |
-| Broadcom BCM43012 | 802.11ac, 2.4 and 5 GHz | upstream `brcmfmac` | `brcmfmac.ko` | `wpa_supplicant` |
-
-Which one is in the image depends on the core board:
+The camera gets its network over Ethernet, and Ethernet is independent of the radio:
 
 ```
-OSHW-reCamera-Series/hardware/recamera-2002/core/c1-2002/README.md
-  C1-2002    No wireless module; exposes additional SDIO/UART signals to the base
-  C1-2002w   Wi-Fi/Bluetooth module, onboard antenna, and I-PEX connector
+external/build/boards/cv181x/sg2002_recamera_emmc/linux/cvitek_sg2002_recamera_emmc_defconfig
+  CONFIG_STMMAC_ETH=y
+  # CONFIG_DWMAC_GENERIC is not set
 ```
 
-The plain `C1-2002` has no radio of its own. The base board can supply one over the exposed SDIO or UART signals. The `C1-2002w` has the module onboard.
+The Ethernet driver is built into the kernel, not a module. Removing the radio touches nothing of it. The `ethernet0` node at `ethernet@4070000` is in the base device tree and stays.
 
-The gpio sharing makes this a decision with a side effect:
+#### What goes
+
+| Thing | Where |
+|---|---|
+| `brcmfmac.ko`, `brcmutil.ko`, `cfg80211.ko` | the kernel modules, loaded by `loadsystemko.sh` |
+| `dot11ah.ko`, `morse.ko`, `mac80211.ko`, `libarc4.ko` | the HaLow radio, same script |
+| `ctr.ko`, `ccm.ko`, `gcm.ko`, `crc7.ko` | the crypto helpers of the HaLow radio |
+| `wpa_supplicant`, `wpa_supplicant_s1g`, `hostapd` | the Buildroot packages |
+| `iw`, `wireless_tools`, `wireless_regdb` | the Buildroot packages |
+| `bt-init`, `bluez5_utils` | the Buildroot packages |
+| `morse_cli` | the external package, it is a HaLow tool |
+| `mm610x_sdio` | the device tree node in the board dts |
+| `wifi_pin` | the device tree node, the power gpio of the radio |
+| `brcmfmac` firmware | the kernel config and the wifi section of the dts |
+
+For the record, HaLow is 802.11ah, the WiFi successor to 802.11ac that was designed for long range and low power. It runs in the sub-GHz band, so the range is in kilometres rather than metres. It is the right radio for a camera that reports over a long link, and the wrong radio for a camera that hangs on a PoE switch.
+
+#### The device tree
+
+The board device tree activates the HaLow radio explicitly. That has to go, because the radio is not on the board:
+
+```
+external/build/boards/cv181x/sg2002_recamera_emmc/dts_riscv/sg2002_recamera_emmc.dts
+  &sd {
+      mm610x_sdio: mm610x-sdio {
+          compatible = "morse,mm610x";
+          reg = <2>;
+          reset-gpios = <&portc 12 GPIO_ACTIVE_HIGH>;
+          status = "okay";
+      };
+  };
+
+  / {
+      wifi_pin {
+          compatible = "cvitek,wifi-pin";
+          poweron-gpio = <&porta 30 GPIO_ACTIVE_HIGH>;
+      };
+  };
+```
+
+Both nodes are deleted, and the `sd` node keeps its other properties.
+
+#### The gpio sharing resolves itself
+
+This was the part that looked risky while the wireless stack was still in scope. With the radio gone it is simple:
 
 ```
 external/ramdisk/rootfs/overlay/cv181x_musl_riscv64/system/ko/loadsystemko.sh
@@ -250,19 +320,32 @@ external/ramdisk/rootfs/overlay/cv181x_musl_riscv64/system/ko/loadsystemko.sh
   }
 ```
 
-The HaLow radio and the SD card share GPIOs. When the HaLow radio is present the script skips the gimbal init and the PoE pinmux. So dropping one radio can change what the other one can do.
+The condition was "no HaLow radio and no SD card", and on the PoE variant both are true. So the PoE pinmux block runs, which is what this variant needs.
 
-Three options, and the plan takes one of them:
+#### The SD card
 
-| Option | What stays | When it is the right one |
-|---|---|---|
-| BCM only | `brcmfmac.ko`, `wpa_supplicant` | The camera is on normal WiFi, or it is on Ethernet. The HaLow radio is not needed. |
-| HaLow only | `dot11ah.ko`, `morse.ko`, `wpa_supplicant_s1g` | The camera reports over a long link, the point of the HaLow radio. |
-| Both | everything | The board has both and both are wanted. The most drivers, the most surface. |
+The SD card stays a normal SD card. The `mm610x_sdio` node was on the same controller, and removing it does not change the controller:
 
-The BCM only option is the default for the minimal image, because a normal WiFi is what a laptop or a phone can join. HaLow needs a special concentrator on the other side, and that is not something a normal network has.
+```
+  &sd {
+      no-1-8-v;
+      max-frequency = <50000000>;
+      /delete-property/ no-sdio;
+      /delete-property/ cap-sd-highspeed;
+      /delete-property/ sd-uhs-sdr104;
+  };
+```
 
-**Open:** the board of the target camera has to be confirmed before this step runs. The hardware repository says the standard Basic product is the `2002w` and the HQ PoE product is the plain `C1-2002`.
+#### What stays
+
+| Thing | Why |
+|---|---|
+| `CONFIG_STMMAC_ETH=y` | The Ethernet driver, built into the kernel. This is the network. |
+| `dhcpcd`, `dnsmasq` | The DHCP client and the DNS forwarder. The camera gets its address over Ethernet. |
+| The PoE pinmux block in `loadsystemko.sh` | Sets up the Ethernet pins on the B301 base board. |
+| `ethernet0` in the base dts | The Ethernet hardware node. |
+
+The `wifi_pin` power gpio is gone, which means the radio never gets powered. On a board without a radio that is correct.
 
 ### Step 3.4: Keep one SSH server
 
@@ -393,9 +476,10 @@ The package has to switch from a tarball download to a Git clone with a pinned t
 | | |
 |---|---|
 | Goal | The sensor still produces a correct image. |
-| Change | Keep `isp_tuning` and `CONFIG_SENSOR_OV_OV5647`. Remove `CONFIG_SENSOR_GCORE_GC2053` and `CONFIG_SENSOR_SMS_SC530AI_2L`. The tuning binaries are copied to `/mnt/system/cfg/param` by `pack_cfg` in `external/setenv.sh`. |
-| Check | The param directory in the image contains the tuning files for the OV5647 and nothing for the other two sensors. |
-| Note | **Decision: OV5647.** That is the sensor the standard product ships with, on the S101 sensor board. The GC2053 is the HQ PoE variant, the SC530AI is a third option. Each sensor needs its own ISP tuning, and the ones that are not used are dead weight in the image. |
+| Change | Keep `isp_tuning` and `CONFIG_SENSOR_GCORE_GC2053`. Remove `CONFIG_SENSOR_OV_OV5647` and `CONFIG_SENSOR_SMS_SC530AI_2L`. The tuning binaries are copied to `/mnt/system/cfg/param` by `pack_cfg` in `external/setenv.sh`. |
+| Check | The param directory in the image contains the tuning files for the GC2053 and nothing for the other two sensors. |
+| Note | **Decision: GC2053.** The target is the HQ PoE, which ships with the `S401 GC2053` sensor board. The OV5647 is the `S101` of the Basic product, the SC530AI is a third option. Each sensor needs its own ISP tuning, and the ones that are not used are dead weight in the image. |
+| Note | The sensor compatibility list in the hardware repository is a driver level snapshot. It lists every driver the SG2002 kernel configuration supports, which is more than the boards that exist. |
 
 ## Step 4: Check the packages that carry the attack surface
 
@@ -504,9 +588,70 @@ The SSH route fits the minimal image, it needs no web server. An HTTP endpoint w
 | | |
 |---|---|
 | Goal | Only the modules the camera needs are loaded. |
-| Change | In `loadsystemko.sh`: remove the TPU module (`cv181x_tpu.ko`), the audio modules and the gimbal init if not wanted. Remove the `morse.ko` and `dot11ah.ko` lines if HaLow goes. |
+| Change | In `loadsystemko.sh`: remove the TPU module (`cv181x_tpu.ko`), the audio modules, the radio modules, the battery module and the gimbal init. |
 | Check | The boot log lists the expected modules and no errors. |
-| Note | The module list also shows the hardware: `ti-ads1015.ko` for the battery on I2C1, `morse.ko` for the HaLow chip, `brcmfmac.ko` for the BCM43012 WiFi. |
+| Note | The module list also shows the hardware, and with the wireless and the battery gone it is short. |
+
+The lines that go:
+
+```
+insmod /mnt/system/ko/cfg80211.ko
+insmod /mnt/system/ko/brcmutil.ko
+insmod /mnt/system/ko/brcmfmac.ko
+
+insmod /mnt/system/ko/ctr.ko
+insmod /mnt/system/ko/ccm.ko
+insmod /mnt/system/ko/gcm.ko
+insmod /mnt/system/ko/crc7.ko
+
+insmod /mnt/system/ko/dot11ah.ko
+insmod /mnt/system/ko/libarc4.ko
+insmod /mnt/system/ko/mac80211.ko
+
+insmod /mnt/system/ko/ti-ads1015.ko
+```
+
+The `ctr`, `ccm`, `gcm` and `crc7` modules belong to the HaLow radio, they are the crypto helpers it needs.
+
+The `init_sd_pin` function and the `sleep 1` after it go as well, they only set up the SDIO pins for the HaLow chip. The `morse.ko` load carries the `country=$COUNTRY` argument from `/etc/recamera.conf/halow_country`, and that file goes too.
+
+The battery module goes because there is no battery. The PoE variant takes its power over the Ethernet cable, so the ADC on I2C1 has nothing to measure:
+
+```
+external/build/boards/cv181x/sg2002_recamera_emmc/dts_riscv/sg2002_recamera_emmc.dts
+  &i2c1 {
+      adc@48 {
+          compatible = "ti,ads1015";
+          reg = <0x48>;
+          ...
+      };
+  };
+```
+
+The `adc@48` node is deleted with it. The `ti-ads1015` driver itself is an upstream kernel driver for the TI ADS1015 ADC, it is generic and not part of the vendor code, so it stays in the kernel. It is simply not loaded.
+
+The reading also only ever went to the battery supervisor API, and the supervisor goes anyway.
+
+What stays in the module list is the video pipeline and the Ethernet:
+
+```
+insmod /mnt/system/ko/cv181x_sys.ko
+insmod /mnt/system/ko/cv181x_base.ko
+insmod /mnt/system/ko/cv181x_rtos_cmdqu.ko
+insmod /mnt/system/ko/cv181x_fast_image.ko
+insmod /mnt/system/ko/cvi_mipi_rx.ko
+insmod /mnt/system/ko/snsr_i2c.ko
+insmod /mnt/system/ko/cv181x_vi.ko vi_log_lv=1
+insmod /mnt/system/ko/cv181x_vpss.ko vpss_log_lv=1
+insmod /mnt/system/ko/cv181x_dwa.ko
+insmod /mnt/system/ko/cv181x_vo.ko vo_log_lv=1
+insmod /mnt/system/ko/cv181x_rgn.ko
+insmod /mnt/system/ko/cv181x_clock_cooling.ko
+insmod /mnt/system/ko/cv181x_vcodec.ko
+insmod /mnt/system/ko/cv181x_jpeg.ko
+insmod /mnt/system/ko/cvi_vc_driver.ko MaxVencChnNum=9 MaxVdecChnNum=9
+insmod /mnt/system/ko/cv181x_ive.ko
+```
 
 ## Step 6: The camera comes up
 
@@ -693,24 +838,16 @@ The toolchain cache does not depend on the target, so the minimal build reuses i
 
 ## Open questions
 
-- HaLow, normal WiFi, or both? The `morse.ko` and `dot11ah.ko` modules are for
-the 802.11ah radio, `brcmfmac.ko` for the BCM43012.
-- Is the battery wanted? The `ads1015` on I2C1 feeds the battery supervisor API.
-- Which sensor to target: OV5647, GC2053 or SC530AI? The defconfig enables all
-three.
-- Does the Linux side talk to the FreeRTOS core? `rtos_cmdqu` is used by the
-region and fast_image parts of the video pipeline.
-- Is a kernel port to 6.4 or 7.x wanted later? It is not a step in this plan,
-it is its own project. The breakdown is in [kernel-upgrade.md](./kernel-upgrade.md).
+The scope decisions are made. They are at the top of this document, in the section "The scope decisions". The steps above carry them inline with a `**Decision:**` marker.
+
+Still open:
+
+- Does the Linux side talk to the FreeRTOS core? `rtos_cmdqu` is used by the region and fast_image parts of the video pipeline. This has to be answered before step 3.6 can drop FreeRTOS.
+- Is a kernel port to 6.4 or 7.x wanted later? It is not a step in this plan, it is its own project. The breakdown is in [kernel-upgrade.md](./kernel-upgrade.md).
 
 The ones below are answered by the code and do not need a decision:
 
 - **The Docker daemon.** The build goes through CI, it does not need Docker locally. The workflow builds without a container.
 - **The ONVIF port.** 8899, the vendor default. It does not collide with anything in the image.
 - **The crypto library for ONVIF.** There is no choice to make. The vendor implementation uses OpenSSL for SHA1, and OpenSSL is already in the image. No libtomcrypt, no mbedtls, no wolfssl.
-
-Still open, and they are additions on top of the extracted module:
-
-- Is the snapshot wanted? Many clients show a thumbnail in the device list, it needs a CGI script that grabs one JPEG.
-- Is PTZ wanted? It needs the CAN interface of the gimbal and four small scripts, plus four ONVIF operations that do not exist yet.
-- Are ONVIF events wanted? Without the AI stack there is no motion detection, so there is nothing to report.
+- **The ONVIF events.** Out of scope. Without the AI stack there is no motion detection, so there is nothing to report.

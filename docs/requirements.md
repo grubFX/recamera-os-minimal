@@ -127,14 +127,15 @@ Work happens on the `develop` branch of `grubFX/recamera-os-minimal`, in small c
 
 The scope of the minimal image is decided. These are the answers, with the reasoning behind each one.
 
-**This section is the authority on the scope.** The plan steps carry the same decisions inline, and where the two differ, this section wins. The decisions are also collected on their own in [decisions.md](./decisions.md), with the reasoning behind each one in full.
+**This section is the authority on the scope.** The plan steps carry the same decisions inline, and where the two differ, this section wins. The decisions are also at the top of [plan.md](./plan.md), with the reasoning behind each one in full.
 
 | Question | Decision | Reason |
 |---|---|---|
 | OTA update | **yes** | The camera sits in a place where it is expensive to reach. A field update without a cable is worth the complexity. The mechanism is already there and it is a good one. |
 | Gimbal and PTZ | **no** | A fixed camera is the target. The gimbal is a separate product variant with its own base board, so the hardware is not always there. PTZ in ONVIF is optional. |
-| Wireless | **to be decided** | See below. |
-| Sensor | **OV5647** | That is what the standard product ships with. |
+| WiFi and HaLow | **no** | The target is the HQ PoE variant. Its core board, the `C1-2002`, has no wireless module. The network is Ethernet. |
+| Battery | **no** | The HQ PoE draws its power over the Ethernet cable, 802.3af PoE Mode A. There is no battery to measure. |
+| Sensor | **GC2053** | The HQ PoE product ships with the `S401 GC2053` sensor board. |
 | Snapshot | **yes** | Many clients show a thumbnail in the device list. Without it the entry is blank and the camera looks broken. |
 
 ### OTA: yes, with one change
@@ -178,25 +179,29 @@ The base board is the CAN base, and the motor protocol is a third-party supplier
 
 The consequence for the plan: the `gimbal` binary, the CAN base board support and the four PTZ operations are all out of scope. Plan step 7.9 is dropped.
 
-### Sensor: OV5647
+### Sensor: GC2053
 
-The standard product ships with the S101 OV5647 sensor board. The `SENSOR_COMPATIBILITY.md` in the hardware repository lists the drivers the SG2002 kernel configuration supports, and the defconfig currently enables three:
+The target is the reCamera HQ PoE, and it ships with the `S401 GC2053` sensor board:
 
 ```
-CONFIG_SENSOR_OV_OV5647=y
-CONFIG_SENSOR_GCORE_GC2053=y
-CONFIG_SENSOR_SMS_SC530AI_2L=y
+OSHW-reCamera-Series/hardware/recamera-2002/products/hq-poe/README.md
+  Sensor            GC2053, 1920x1080 at 30fps
+  Sensor board      S401 GC2053
 ```
 
-Only the OV5647 stays as the target. The other two are for the GC2053 variant of the HQ PoE product and for the SC530AI.
+The defconfig currently enables three sensors:
 
-The ISP tuning binaries follow the sensor, they are copied to `/mnt/system/cfg/param` by `pack_cfg`. The plan keeps exactly the ones for the target sensor.
+```
+CONFIG_SENSOR_OV_OV5647=y        goes, that is the S101 of the Basic product
+CONFIG_SENSOR_GCORE_GC2053=y      stays, this is the S101 of the HQ PoE
+CONFIG_SENSOR_SMS_SC530AI_2L=y   goes, a third option
+```
 
-### Wireless: open, and it is a real question
+The ISP tuning binaries follow the sensor, they are copied to `/mnt/system/cfg/param` by `pack_cfg`. The plan keeps exactly the ones for the GC2053.
 
-This is not a preference between two radios, it depends on which board the camera has.
+### WiFi and HaLow: no
 
-The core board comes in two variants:
+The target is the HQ PoE, and its core board has no wireless module:
 
 ```
 OSHW-reCamera-Series/hardware/recamera-2002/core/c1-2002/README.md
@@ -204,31 +209,24 @@ OSHW-reCamera-Series/hardware/recamera-2002/core/c1-2002/README.md
   C1-2002w   Wi-Fi/Bluetooth module, onboard antenna, and I-PEX connector
 ```
 
-The `w` suffix identifies the wireless version. The standard Basic product is the `2002w`, the HQ PoE product is built on the plain `C1-2002`.
+Both radios go, the HaLow one and the Broadcom one, with their packages, their kernel modules and their device tree nodes.
 
-The image carries drivers for three radios:
+What HaLow is, for the record: 802.11ah, the WiFi successor to 802.11ac, designed for long range and low power. It runs in the sub-GHz band, so the range is in kilometres rather than metres. It is the right radio for a camera that reports over a long link, and the wrong radio for a camera that hangs on a PoE switch.
 
-| Radio | Driver | Kernel module |
-|---|---|---|
-| Morse mm610x | 802.11ah, the vendor tree in `external/linux/drivers/fgh100m/` | `dot11ah.ko`, `morse.ko` |
-| Broadcom BCM43012 | 802.11ac, upstream `brcmfmac` | `brcmfmac.ko` |
-
-What HaLow is: 802.11ah, the WiFi successor to 802.11ac that was designed for long range and low power. It runs in the sub-GHz band, so the range is in kilometres rather than metres. That is the point of it: a camera that reports over a long link without asking for much power.
-
-The two are not alternatives in the same sense. They are two different radios for two different jobs, and the board decides which one exists. The plan needs to know which variant the target camera is.
-
-There is a detail in the boot script that matters for this:
+The Ethernet driver is built into the kernel, not a module, so the network is unaffected:
 
 ```
-external/ramdisk/rootfs/overlay/cv181x_musl_riscv64/system/ko/loadsystemko.sh
-  [ ! -e /dev/morse_io ] && [ ! -e /dev/mmcblk1 ] && {
-      # gimbal
-      [ -x /usr/bin/gimbal ] && { ... }
-      # PoE
-      ...
-  }
+external/build/boards/cv181x/sg2002_recamera_emmc/linux/cvitek_sg2002_recamera_emmc_defconfig
+  CONFIG_STMMAC_ETH=y
+  # CONFIG_DWMAC_GENERIC is not set
 ```
 
-The HaLow radio and the SD card share GPIOs, so the script skips the gimbal and the PoE pinmux when the HaLow radio is present. Dropping one radio can therefore change what the other one can do, and that has to be checked before removing anything.
+Plan step 3.3 has the list of everything that goes.
 
-Plan step 3.3 keeps the wireless stack. What it keeps depends on the answer.
+### Battery: no
+
+The HQ PoE draws its power over the Ethernet cable, 802.3af PoE Mode A. There is no battery in the product.
+
+The battery reading came from an ADC on I2C1, `adc@48` with `compatible = "ti,ads1015"` in the device tree. The node is deleted and `ti-ads1015.ko` is not loaded. The driver stays in the kernel, it is an upstream driver for the TI ADS1015 ADC and not vendor code, it is simply not used.
+
+The reading also only ever went to the battery supervisor API, and the supervisor goes anyway.
