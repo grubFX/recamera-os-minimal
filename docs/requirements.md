@@ -17,7 +17,13 @@ chips"), which adds the CV181X device trees and drivers. The modifications to
 `arch/riscv/` are backports from upstream v5.12/v5.15, verified by diffing
 against the upstream releases.
 
-The evidence is in [submodule-review.md](./submodule-review.md).
+The kernel is also not abandoned. Upstream Linux 5.10 is a longterm release and
+still gets fixes, the last one `3a323bc2` "Linux 5.10.274" from 2026-11-06.
+The fork mirrors that with the weekly stable releases.
+
+The evidence is in [submodule-review.md](./submodule-review.md), the cost of a
+newer kernel in [kernel-upgrade.md](./kernel-upgrade.md).
+
 
 ## 2. No prebuilt binaries in the image
 
