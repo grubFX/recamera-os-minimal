@@ -8,7 +8,6 @@ fi
 export PROJECT_OUT=$OUTDIR/$TARGET
 export PROJECT_DIR=$(dirname $(realpath $DEFCONFIGS/${1}_defconfig))
 
-export BR2_EXTERNAL="$EXTERNAL/br2-external"
 export BUILDROOT_DIR=$(basename $(realpath $TOPDIR/buildroot*))
 export UBOOT_DIR=$(basename $(realpath $TOPDIR/u-boot*))
 export LINUX_DIR=$(basename $(realpath $TOPDIR/linux*))

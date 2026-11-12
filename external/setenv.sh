@@ -97,7 +97,16 @@ rsync_dir ./cvikernel
 rsync_dir ./cvimath
 rsync_dir ./cviruntime
 rsync_dir ./flatbuffers
-rsync_dir ./tdl_sdk
+# The tdl_sdk moves files between releases. Without --delete the copies of
+# files that were moved or renamed stay in the output and are compiled
+# together with the new ones. That breaks the build: the old
+# src/components/nn/tdl_model_factory.cpp calls BaseModel::modelOpen with a
+# path, the current header takes a device id.
+# The build and install directories are excluded: build/ holds the third
+# party sources that CMake fetched over the network, and they are not part of
+# the source tree. rsync does not delete excluded files on the receiver.
+rsync -a --delete --exclude='.git' --exclude='/build/' --exclude='/install/' \
+    ./tdl_sdk/ $PROJECT_OUT/tdl_sdk/
 rsync_dir ./cvi_rtsp
 
 ###################################
@@ -120,6 +129,13 @@ rsync_dir $EXTERNAL/buildroot/ $BUILDROOT_DIR/
 rsync_dir $EXTERNAL/isp_tuning .
 rsync_dir $EXTERNAL/ramdisk/ ramdisk/
 rsync_dir $EXTERNAL/u-boot/ $UBOOT_DIR/
+
+# The cvi_rtsp submodule switched from the master branch to sg200x-dev, which
+# is the branch that matches the middleware of this tree. The old branch had
+# files that the new one does not have, and rsync without --delete leaves
+# them in the output, where they are compiled. Remove what the source tree
+# does not have, so the output matches the source.
+rsync -a --delete --exclude='.git' ./cvi_rtsp/ $PROJECT_OUT/cvi_rtsp/
 
 # The sensor overlay in $EXTERNAL/SensorSupportList adds the ov5647 driver
 # (5MP mode) and replaces sensor.mk. It has to be copied BEFORE the
@@ -162,6 +178,15 @@ for patch in "$EXTERNAL/cvi_rtsp/patches"/*.patch; do
     [ -f "$patch" ] || continue
 
     echo "Applying cvi_rtsp patch: $(basename "$patch")"
+    # A patch that creates a file fails on a rebuild, because the file is
+    # already there and "patch --forward" skips it. Remove the files the
+    # patch creates first, so the patch applies the same way every time.
+    # Only "--- /dev/null" marks a file as new, a normal "--- a/..." header
+    # means the file is modified and has to stay.
+    awk '/^--- \/dev\/null$/{newfile=1; next} /^--- /{newfile=0} newfile && /^\+\+\+ b\//{print substr($0, 7)}' "$patch" |
+    while read -r created; do
+        rm -f "$created"
+    done
     patch -p1 --forward < "$patch" || {
         echo "Error: Failed to apply $patch"
         exit 1
@@ -233,20 +258,6 @@ sed -i '/LOCAL_CFLAGS = $(DEFS) $(INCS)/i LIBS += -ltinyalsa' $PROJECT_OUT/cvi_m
 
 # override build_cvi_rtsp function
 sed -i 's/function build_cvi_rtsp()/function _build_cvi_rtsp_()/g' $PROJECT_OUT/build/envsetup_soc.sh || exit 1
-# MW_VER selects the middleware API generation: the service uses it in
-# "#if (MW_VER == 2)" and "#if MW_VER == 1". Without it the preprocessor gets
-# "-DMW_VER=" and the comparison becomes a syntax error. The middleware in
-# this tree is generation 1: it has no pkgconfig directory and does not
-# define _MIDDLEWARE_V2_, and the v1 code path uses CVI_BIN_SetBinName and
-# CVI_VI_SetDevNum, which the headers do provide.
-function build_cvi_rtsp()
-{(
-    cd "$CVI_RTSP_PATH" || return
-    BUILD_SERVICE=1 MW_DIR=${MW_PATH} MW_VER=1 ./build.sh
-    BUILD_SERVICE=1 MW_VER=1 make install DESTDIR="$(pwd)/install" || return "$?"
-    make package DESTDIR="$(pwd)/install" || return "$?"
-    BUILD_SERVICE=1 MW_VER=1 make install DESTDIR="${SYSTEM_OUT_DIR}/usr" || return "$?"
-)}
 
 # source envsetup_soc.sh
 TPU_REL=1
@@ -255,6 +266,36 @@ source $PROJECT_OUT/build/envsetup_soc.sh || exit 1
 ###################################
 # overwrite envsetup_soc.sh functions
 ###################################
+# MW_DIR points the RTSP build at the middleware of this tree. Without it the
+# service looks for the headers in ../middleware/<version>, which does not
+# exist, and the build stops with "cvi_type.h: No such file or directory".
+# The definition has to come after the source above, otherwise the source
+# overwrites it with the original function.
+function build_cvi_rtsp()
+{(
+    cd "$CVI_RTSP_PATH" || return
+
+    # The tdl_sdk links the RTSP service statically and expects the live555
+    # archives in cvi_rtsp/prebuilt/lib (tdl_sdk/cmake/cvi_rtsp.cmake). The
+    # RTSP build does not create that directory: external/build.sh exports
+    # LIVE555_DIR to the TPU SDK, so cvi_rtsp/build.sh takes the "use the
+    # prebuilt library" branch and never unpacks the tarball. Without the
+    # links the tdl_sdk configure step fails with "Cannot find source file:
+    # cvi_rtsp/prebuilt/lib/libBasicUsageEnvironment.a".
+    local live_lib="$TPU_SDK_INSTALL_PATH/lib"
+    if [ -f "$live_lib/libliveMedia.a" ]; then
+        mkdir -p prebuilt/lib
+        for lib in libliveMedia.a libBasicUsageEnvironment.a libUsageEnvironment.a libgroupsock.a; do
+            ln -sf "$live_lib/$lib" "prebuilt/lib/$lib"
+        done
+    fi
+
+    BUILD_SERVICE=1 MW_DIR=${MW_PATH} ./build.sh
+    BUILD_SERVICE=1 MW_DIR=${MW_PATH} make install DESTDIR="$(pwd)/install" || return "$?"
+    make package DESTDIR="$(pwd)/install" || return "$?"
+    BUILD_SERVICE=1 MW_DIR=${MW_PATH} make install DESTDIR="${SYSTEM_OUT_DIR}/usr" || return "$?"
+)}
+
 function build_middleware()
 {(
     print_notice "Run ${FUNCNAME[0]}() overided by $0"
