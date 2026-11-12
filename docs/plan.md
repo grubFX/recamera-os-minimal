@@ -809,7 +809,7 @@ PTZ is **out of scope**. The gimbal is a separate product variant with its own b
 | 0 | Baseline build and inventory | The upstream image builds, and a list of its contents |
 | 1 | Understand the pipeline | The chain from sensor to RTSP written down |
 | 2 | New buildroot tree and defconfig | The minimal target builds with the same content as the baseline |
-| 3 | Remove the app layer | A much smaller image: no Node-RED, no broker, no web UI, no AI, no FreeRTOS, live555 from source |
+| 3 | Remove the app layer | A much smaller image: no Node-RED, no broker, no web UI, no AI, no FreeRTOS, no radio, no battery, live555 from source |
 | 4 | Check the network facing packages | The versions of dropbear, busybox and openssl are known and acceptable |
 | 5 | Trim the boot overlay | No auto update, no app start, only the needed services |
 | 6 | The camera comes up | The RTSP server starts with a config, two streams |
@@ -818,7 +818,7 @@ PTZ is **out of scope**. The gimbal is a separate product variant with its own b
 
 Steps 0 to 2 are the safety net. Nothing is removed before step 3. Every step ends in a build that has to succeed. Step 2.3 is the important one: the minimal target builds and has the same content as the baseline. After that, every change is a difference from a known good state.
 
-The plan produces a camera with RTSP and ONVIF. Not a web UI, not a flow editor, not a broker.
+The plan produces a camera with RTSP and ONVIF, on Ethernet, updated over the air when someone asks for it. Not a web UI, not a flow editor, not a broker, not a radio.
 
 ### The build runs in CI
 
