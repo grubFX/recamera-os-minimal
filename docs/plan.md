@@ -302,24 +302,84 @@ So the minimal image needs `BUILD_EXAMPLE=1`, or a new buildroot package that bu
 
 ## Step 7: ONVIF
 
-ONVIF is new code on top of the working camera. It is a separate step because it depends on the pipeline from step 5 being right.
+ONVIF is a direct goal of the image, not a later idea. The camera speaks RTSP already, ONVIF is the discovery layer on top.
 
-### Step 7.1: Pick the approach
+The approach is decided: `roleoroleo/onvif_simple_server`. It is a C implementation for resource constrained devices, without gsoap and without libxml. It runs as CGI under the BusyBox httpd that is already in the image.
 
-| | |
-|---|---|
-| Goal | A decision, not code. |
-| Options | A: use an existing ONVIF server, for example `onvif-server` or `gsoap` based ones. B: write a small ONVIF service that maps the ONVIF calls onto the CVI API. |
-| Check | The choice is written down with the reason. |
-| Note | Option A is much less work but pulls in dependencies. Option B gives a small image but is a lot of code. ONVIF needs SOAP, which is why `libhv` may stay after all. |
+The details are in [onvif.md](./onvif.md).
 
-### Step 7.2: Build the service
+### Step 7.1: The buildroot package
 
 | | |
 |---|---|
-| Goal | `GetProfiles`, `GetStreamUri` and the RTSP describe work. |
-| Change | The service as a new package in the minimal external tree. |
-| Check | It starts at boot and answers on the ONVIF port. |
+| Goal | `onvif_simple_server` builds and is in the image. |
+| Change | A new package in the minimal external tree. Upstream has a plain Makefile, no autotools. Build the three binaries: the server, the notify server and the web services discovery server. |
+| Check | The three binaries are in the image. The build log has no error about a missing dependency. |
+| Dependencies | libtomcrypt for the crypto, zlib and json-c. All three exist in Buildroot. zlib and json-c are already in the image. |
+| Note | The upstream Makefile picks the crypto library with `HAVE_WOLFSSL` or `HAVE_MBEDTLS`, otherwise it uses libtomcrypt. libtomcrypt is the smaller one. |
+
+### Step 7.2: The configuration
+
+| | |
+|---|---|
+| Goal | The server knows the camera identity and the two streams. |
+| Change | A configuration file with the model, manufacturer, firmware version, hardware id and serial number from the supervisor API. Two profiles, the main stream and the sub stream. |
+| Check | The file is in the image and the server starts with it. |
+| Note | The serial number and the firmware version come from `/api/deviceMgr/queryDeviceInfo`. The identity should match what the device reports, a client checks it. |
+
+### Step 7.3: Two RTSP streams
+
+| | |
+|---|---|
+| Goal | The camera serves a main and a sub stream, with the names the ONVIF configuration points at. |
+| Change | The `cvi_rtsp` JSON configuration gets two entries. The session names have to match the paths in the ONVIF configuration, `ch0_0.h264` and `ch0_1.h264`. |
+| Check | The JSON parses, and the paths in it match the ONVIF configuration. |
+| Note | The chip has `VENC_MAX_CHN_NUM 16`, two channels are plenty. The service library itself supports `SERVICE_CTX_ENTITY_MAX_NUM 2` entities. |
+
+### Step 7.4: The http server
+
+| | |
+|---|---|
+| Goal | The ONVIF endpoint answers. |
+| Change | Configure BusyBox httpd to run the CGI. The upstream project has a patch for BusyBox httpd to serve the `onvif/` path, it needs to go into the Buildroot tree. |
+| Check | The endpoint `http://<ip>:<port>/onvif/device_service` answers with a device description. |
+| Note | The upstream project runs its own example with lighttpd, that is only for the test setup. For the image it is BusyBox httpd. |
+
+### Step 7.5: Web services discovery
+
+| | |
+|---|---|
+| Goal | A client finds the camera without knowing the address. |
+| Change | An init script for `wsd_simple_server`, it answers on UDP 3700. |
+| Check | The process is running and listening. |
+| Note | Without this the camera only shows up when the address is entered by hand. |
+
+### Step 7.6: Snapshot, optional
+
+| | |
+|---|---|
+| Goal | A still image for the ONVIF snapshot URL. |
+| Change | A CGI script that grabs one JPEG from the pipeline and writes it to stdout. The encoder supports `CVI_RTSP_VIDEO_JPEG`. |
+| Check | The snapshot URL returns a JPEG. |
+| Note | Many clients show a thumbnail in the device list. Without it the entry is blank. |
+
+### Step 7.7: PTZ, optional
+
+| | |
+|---|---|
+| Goal | The gimbal is controllable from an ONVIF client. |
+| Change | The PTZ section of the configuration with the scripts for the position and the movement commands. They call the CAN interface of the gimbal. |
+| Check | A client can move the gimbal. |
+| Note | Only if the gimbal is in scope. A camera without a gimbal leaves the section out, PTZ is optional in ONVIF. |
+
+### Step 7.8: Events, optional
+
+| | |
+|---|---|
+| Goal | The camera reports events to the client. |
+| Change | The notify server with the event configuration. It reads the event state from files. |
+| Check | The notify server answers. |
+| Note | Without the AI stack there is no motion detection, so there is nothing to report. This step only makes sense together with some event source. |
 
 ## Step 8: Flash and verify
 
@@ -350,12 +410,14 @@ ONVIF is new code on top of the working camera. It is a separate step because it
 | 3 | Remove the app layer | A much smaller image: no Node-RED, no broker, no web UI, no AI, no FreeRTOS, live555 from source |
 | 4 | Check the network facing packages | The versions of dropbear, busybox and openssl are known and acceptable |
 | 5 | Trim the boot overlay | No auto update, no app start, only the needed services |
-| 6 | The camera comes up | The RTSP server starts with a config |
-| 7 | ONVIF | The ONVIF service answers |
+| 6 | The camera comes up | The RTSP server starts with a config, two streams |
+| 7 | ONVIF | The device service answers, a client sees two profiles |
 | 8 | Flash and verify | The camera boots on the minimal image |
 
 Steps 0 to 2 are the safety net. Nothing is removed before step 3. Every step ends in a build that has to succeed.
 Step 2.3 is the important one: the minimal target builds and has the same content as the baseline. After that, every change is a difference from a known good state.
+
+The plan produces a camera with RTSP and ONVIF. Not a web UI, not a flow editor, not a broker.
 
 ## Open questions
 
@@ -366,10 +428,14 @@ the 802.11ah radio, `brcmfmac.ko` for the BCM43012.
 - Is the battery wanted? The `ads1015` on I2C1 feeds the battery supervisor API.
 - Which sensor to target: OV5647, GC2053 or SC530AI? The defconfig enables all
 three.
-- ONVIF: existing server or own implementation?
 - Does the Linux side talk to the FreeRTOS core? `rtos_cmdqu` is used by the
 region and fast_image parts of the video pipeline.
 - Can the Docker daemon be started on this machine? The build needs it, and
 there is no sudo.
 - Is a kernel port to 6.4 or 7.x wanted later? It is not a step in this plan,
 it is its own project. The breakdown is in [kernel-upgrade.md](./kernel-upgrade.md).
+- Which ONVIF port? The default in the upstream example is 8080, the ONVIF standard is 80.
+- Is the snapshot wanted? Many clients show a thumbnail in the device list, it needs a CGI script that grabs one JPEG.
+- Is PTZ wanted? It needs the CAN interface of the gimbal and four small scripts.
+- Are ONVIF events wanted? Without the AI stack there is no motion detection, so there is nothing to report.
+- Which crypto library for the ONVIF server? libtomcrypt is the smallest, mbedtls and wolfssl are the alternatives.

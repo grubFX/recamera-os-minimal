@@ -52,16 +52,27 @@ The decision per piece is in [plan.md](./plan.md).
 
 ## 5. The camera has to work
 
-Camera, RTSP, SSH, WiFi, NTP. ONVIF afterwards.
+Camera, RTSP, ONVIF, SSH, WiFi, NTP.
+
 **Status: open.** This is what the plan is for.
 
-## 6. No known CVE in the network facing packages
+## 6. ONVIF, without a SOAP stack
+
+The camera has to be discoverable and controllable from a standard ONVIF client. Without pulling a SOAP stack into the image.
+
+**Status: open, approach decided.** `roleoroleo/onvif_simple_server`. A C implementation for resource constrained devices, no gsoap and no libxml, it runs as CGI under the BusyBox httpd that is already in the image. It implements Profile S and Profile T.
+
+The dependencies are libtomcrypt, zlib and json-c. All three exist in Buildroot, two of them are already in the image.
+
+The details are in [onvif.md](./onvif.md).
+
+## 7. No known CVE in the network facing packages
 
 The image is reachable from the network. Dropbear, busybox and openssl have to be on versions without known vulnerabilities.
 **Status: open.** Buildroot 2021.05 is end of life, its upstream branch stopped in June 2021. The newer Buildroot in the same Sophgo repo has no CV181X support, so the fix is to bump the single package in the fork, not to move the tree.
 Plan step 4.
 
-## 7. Everything is committed and pushed
+## 8. Everything is committed and pushed
 
 Work happens on the `develop` branch of `grubFX/recamera-os-minimal`, in small commits that can be read on their own.
 **Status: in progress.**

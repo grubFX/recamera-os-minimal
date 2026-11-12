@@ -4,6 +4,7 @@ Goal: a small, understandable image for the Seeed reCamera (SG2002 / CV181X).
 Kept:
 
 - Camera: sensor, ISP, video encoding, RTSP
+- ONVIF, so the camera shows up in an NVR or VMS on its own
 - SSH
 - WiFi
 - NTP
@@ -14,8 +15,6 @@ Removed:
 - The sscma app layer (inference, supervisor, device manager)
 - Avahi, ttyd, dnsmasq, Bluetooth
 - The prebuilt `reCamera.zip` blob
-
-Goal later: ONVIF.
 
 ## What the upstream image is made of
 
