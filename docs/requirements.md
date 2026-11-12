@@ -1,0 +1,75 @@
+# Requirements
+
+Hard requirements for the minimal reCamera OS. These are not preferences.
+
+## 1. The kernel has to be real upstream Linux
+
+The kernel source has to trace back to genuine upstream Linux source code.
+No proprietary code, no closed blobs, nothing that only pretends to be Linux.
+
+**Status: met.** The kernel is `sophgo/linux_5.10`, whose history starts at
+`b1313fe517` "Linux 5.10.4" by Greg Kroah-Hartman and continues with upstream
+authors. Above that there are exactly two Sophgo commits, then weekly stable
+releases.
+
+The vendor additions are in one commit (`b4ca5efcaf` "linux porting cvitek asic
+chips"), which adds the CV181X device trees and drivers. The modifications to
+`arch/riscv/` are backports from upstream v5.12/v5.15, verified by diffing
+against the upstream releases.
+
+The evidence is in [submodule-review.md](./submodule-review.md).
+
+## 2. No prebuilt binaries in the image
+
+Every binary in the image has to be built from source that is in the repo or
+that comes from a verifiable upstream release with a checked hash.
+
+**Status: not met yet.** Two blobs to remove:
+
+- `oss/oss_release_tarball/musl_riscv64/live555.tar.gz` contains only compiled
+  binaries. Live555 is LGPL-3.0 and available as a Buildroot package with a
+  verified hash. Build it from source instead.
+- `oss/oss_release_tarball/*/opencv_aisdk.tar.gz` contains only libraries.
+  Goes with the TPU stack.
+
+The `reCamera.zip` blob is already dead, its source branch no longer exists
+upstream.
+
+## 3. No hidden code in the forks
+
+The forks of upstream software must be small enough to audit, and the delta
+must be documented.
+
+**Status: met.**
+
+| Fork | Own commits | Behind upstream |
+|---|---|---|
+| `linux_5.10` | 1 porting commit + stable releases | 0 |
+| `buildroot-2021.05` | 6 | 0 |
+| `u-boot-2021.10` | 3 | 0 |
+| `opensbi` | 10 | 381 |
+
+## 4. Normal Linux, no weird patches
+
+The result has to be a normal Linux system. No patched binaries, no
+initializer that only works on this one device, no hidden state.
+
+**Status: open.** The boot overlay sets up an overlayfs over nine directories
+on the userdata partition. That is a design decision of the vendor image. It
+also carries the factory reset and the OTA update, which are worth keeping for
+a camera that can be bricked by a bad flash.
+
+The decision per piece is in [plan.md](./plan.md).
+
+## 5. The camera has to work
+
+Camera, RTSP, SSH, WiFi, NTP. ONVIF afterwards.
+
+**Status: open.** This is what the plan is for.
+
+## 6. Everything is committed and pushed
+
+Work happens on the `develop` branch of `grubFX/recamera-os-minimal`, in small
+commits that can be read on their own.
+
+**Status: in progress.**
