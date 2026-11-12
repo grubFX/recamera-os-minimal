@@ -4,36 +4,27 @@ Hard requirements for the minimal reCamera OS. These are not preferences.
 
 ## 1. The kernel has to be real upstream Linux
 
-The kernel source has to trace back to genuine upstream Linux source code. No proprietary code, no closed blobs, nothing that only pretends to be Linux.
-**Status: met.** The kernel is `sophgo/linux_5.10`, whose history starts at `b1313fe517` "Linux 5.10.4" by Greg Kroah-Hartman and continues with upstream authors. Above that there are exactly three Sophgo commits, then weekly stable releases.
-The vendor additions are in one commit (`b4ca5efcaf` "linux porting cvitek asic chips"), which adds the CV181X device trees and drivers. The modifications to `arch/riscv/` are backports from upstream v5.12/v5.15, verified by diffing against the upstream releases.
-The kernel is also not abandoned. Upstream Linux 5.10 is a longterm release and still gets fixes, the last one `3a323bc2` "Linux 5.10.274" from 2026-11-06. The fork mirrors that with the weekly stable releases.
-The evidence is in [submodule-review.md](./submodule-review.md), the cost of a newer kernel in [kernel-upgrade.md](./kernel-upgrade.md).
+The kernel source has to trace back to genuine upstream Linux source code. No proprietary code, no closed blobs, nothing that only pretends to be Linux. **Status: met.** The kernel is `sophgo/linux_5.10`, whose history starts at `b1313fe517` "Linux 5.10.4" by Greg Kroah-Hartman and continues with upstream authors. Above that there are exactly three Sophgo commits, then weekly stable releases. The vendor additions are in one commit (`b4ca5efcaf` "linux porting cvitek asic chips"), which adds the CV181X device trees and drivers. The modifications to `arch/riscv/` are backports from upstream v5.12/v5.15, verified by diffing against the upstream releases. The kernel is also not abandoned. Upstream Linux 5.10 is a longterm release and still gets fixes, the last one `3a323bc2` "Linux 5.10.274" from 2026-11-06. The fork mirrors that with the weekly stable releases. The evidence is in [submodule-review.md](./submodule-review.md), the cost of a newer kernel in [kernel-upgrade.md](./kernel-upgrade.md).
 
 ## 2. No prebuilt binaries in the image
 
-Every binary in the image has to be built from source that is in the repo or that comes from a verifiable upstream release with a checked hash.
-**Status: not met yet.** Two blobs to remove:
+Every binary in the image has to be built from source that is in the repo or that comes from a verifiable upstream release with a checked hash. **Status: not met yet.** Two blobs to remove:
 
 - `oss/oss_release_tarball/musl_riscv64/live555.tar.gz` contains only compiled
 binaries. Live555 is LGPL-3.0 and available as a Buildroot package with a verified hash. Build it from source instead.
 - `oss/oss_release_tarball/*/opencv_aisdk.tar.gz` contains only libraries.
-Goes with the TPU stack.
-The `reCamera.zip` blob is already dead, its source branch no longer exists upstream.
+Goes with the TPU stack. The `reCamera.zip` blob is already dead, its source branch no longer exists upstream.
 
 ### The live555 blob was checked in detail
 
-The blob was verified against the upstream source, header by header, using the
-`rgaufman/live555` Git mirror.
+The blob was verified against the upstream source, header by header, using the `rgaufman/live555` Git mirror.
 
 ```
 live.2020.04.24   175 of 181 headers byte identical
                    6 differ, 4 of them only in the version string
 ```
 
-The blob is Live555 **2020.07.21**, one release newer than the commit that
-was compared. The headers are unmodified upstream code, there is no injected
-code in them.
+The blob is Live555 **2020.07.21**, one release newer than the commit that was compared. The headers are unmodified upstream code, there is no injected code in them.
 
 The four static archives are the problem:
 
@@ -46,13 +37,9 @@ lib/libUsageEnvironment.a
 GCC: (Xuantie-900 linux-5.10.4 musl gcc Toolchain V2.6.1 B-20220906) 10.2.0
 ```
 
-Compiled objects, no source, built with the vendor cross compiler. The
-source is identifiable, but the compiled artifacts cannot be verified against
-a reference build without reproducing the vendor toolchain. That is what
-requirement 2 forbids, so the blob goes and Live555 is built from source.
+Compiled objects, no source, built with the vendor cross compiler. The source is identifiable, but the compiled artifacts cannot be verified against a reference build without reproducing the vendor toolchain. That is what requirement 2 forbids, so the blob goes and Live555 is built from source.
 
-One problem with the Buildroot package has to be fixed along the way: the
-official site no longer serves the tarballs.
+One problem with the Buildroot package has to be fixed along the way: the official site no longer serves the tarballs.
 
 ```
 http://www.live555.com/liveMedia/public/live.2021.05.03.tar.gz   404
@@ -62,8 +49,7 @@ The package has to switch to a Git clone with a pinned commit.
 
 ## 3. No hidden code in the forks
 
-The forks of upstream software must be small enough to audit, and the delta must be documented.
-**Status: met.**
+The forks of upstream software must be small enough to audit, and the delta must be documented. **Status: met.**
 
 | Fork | Own commits | Behind upstream |
 |---|---|---|
@@ -84,21 +70,13 @@ plus 28 `weekly rls` commits. The stable releases carry upstream fixes, not vend
 
 ### The vendor app stack is a separate question
 
-The `sscma-example-sg200x` fork is not in this table, because it is not a
-fork of an upstream project. It is the Seeed application stack, Apache-2.0,
-and it is the source of the code the minimal image reuses.
+The `sscma-example-sg200x` fork is not in this table, because it is not a fork of an upstream project. It is the Seeed application stack, Apache-2.0, and it is the source of the code the minimal image reuses.
 
-The ONVIF implementation comes from there, and it was checked: it is in the
-public repository under `solutions/sscma-node/main/node/onvif/`, 1267 lines
-across 8 files, with the Apache-2.0 license header intact. It has no
-reference to the video pipeline at all.
+The ONVIF implementation comes from there, and it was checked: it is in the public repository under `solutions/sscma-node/main/node/onvif/`, 1267 lines across 8 files, with the Apache-2.0 license header intact. It has no reference to the video pipeline at all.
 
 ## 4. Normal Linux, no weird patches
 
-The result has to be a normal Linux system. No patched binaries, no initializer that only works on this one device, no hidden state.
-**Status: open.** The boot overlay sets up an overlayfs over nine directories on the userdata partition. That is a design decision of the vendor image. It also carries the factory reset and the OTA update, which are worth keeping for a camera that can be bricked by a bad flash.
-One thing does not fit the description of a normal Linux system and goes: `auto_download.sh` polls the GitHub release feed of `reCamera-OS` every 60 seconds and installs whatever it finds.
-The decision per piece is in [plan.md](./plan.md).
+The result has to be a normal Linux system. No patched binaries, no initializer that only works on this one device, no hidden state. **Status: open.** The boot overlay sets up an overlayfs over nine directories on the userdata partition. That is a design decision of the vendor image. It also carries the factory reset and the OTA update, which are worth keeping for a camera that can be bricked by a bad flash. One thing does not fit the description of a normal Linux system and goes: `auto_download.sh` polls the GitHub release feed of `reCamera-OS` every 60 seconds and installs whatever it finds. The decision per piece is in [plan.md](./plan.md).
 
 ## 5. The camera has to work
 
@@ -112,10 +90,7 @@ The camera has to be discoverable and controllable from a standard ONVIF client.
 
 **Status: open, approach decided, implementation found.**
 
-The vendor stack already has an ONVIF implementation. It is in the public
-Apache-2.0 repository `Seeed-Studio/sscma-example-sg200x`, in the directory
-`solutions/sscma-node/main/node/onvif/`, 1267 lines across 8 files. The
-CHANGELOG entry for 0.2.5 records it as a shipped feature.
+The vendor stack already has an ONVIF implementation. It is in the public Apache-2.0 repository `Seeed-Studio/sscma-example-sg200x`, in the directory `solutions/sscma-node/main/node/onvif/`, 1267 lines across 8 files. The CHANGELOG entry for 0.2.5 records it as a shipped feature.
 
 ```
 GetProfiles            GetStreamUri             GetCapabilities
@@ -134,24 +109,16 @@ The dependency situation is the reason to prefer it:
 | XML | hand written scanner | ezxml |
 | SOAP stack | none | none |
 
-No new dependency in the image, and the implementation was tested against
-real NVRs, including the fix for a truncated `GetCapabilities` response that
-Hikvision NVRs read as invalid XML.
+No new dependency in the image, and the implementation was tested against real NVRs, including the fix for a truncated `GetCapabilities` response that Hikvision NVRs read as invalid XML.
 
-The work is the extraction. The code is compiled into `sscma-node`, the
-Node-RED node binary, and it has to become a standalone daemon. The vendor
-coupling is four symbols: `ma::Mutex`, `ma::Guard`, `ma_err_t` and
-`PROJECT_VERSION`.
+The work is the extraction. The code is compiled into `sscma-node`, the Node-RED node binary, and it has to become a standalone daemon. The vendor coupling is four symbols: `ma::Mutex`, `ma::Guard`, `ma_err_t` and `PROJECT_VERSION`.
 
 The details are in [onvif.md](./onvif.md).
 
 ## 7. No known CVE in the network facing packages
 
-The image is reachable from the network. Dropbear, busybox and openssl have to be on versions without known vulnerabilities.
-**Status: open.** Buildroot 2021.05 is end of life, its upstream branch stopped in June 2021. The newer Buildroot in the same Sophgo repo has no CV181X support, so the fix is to bump the single package in the fork, not to move the tree.
-Plan step 4.
+The image is reachable from the network. Dropbear, busybox and openssl have to be on versions without known vulnerabilities. **Status: open.** Buildroot 2021.05 is end of life, its upstream branch stopped in June 2021. The newer Buildroot in the same Sophgo repo has no CV181X support, so the fix is to bump the single package in the fork, not to move the tree. Plan step 4.
 
 ## 8. Everything is committed and pushed
 
-Work happens on the `develop` branch of `grubFX/recamera-os-minimal`, in small commits that can be read on their own.
-**Status: in progress.**
+Work happens on the `develop` branch of `grubFX/recamera-os-minimal`, in small commits that can be read on their own. **Status: in progress.**

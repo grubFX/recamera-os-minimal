@@ -1,7 +1,6 @@
 # Submodule review
 
-Every submodule in the repo, checked for: is it a fork of something upstream, is it a blob, how old is it, and is there a better known alternative.
-**Hard requirement:** the kernel code has to trace back to real upstream Linux source. No proprietary code dressed up as Linux. This document is the evidence for that requirement.
+Every submodule in the repo, checked for: is it a fork of something upstream, is it a blob, how old is it, and is there a better known alternative. **Hard requirement:** the kernel code has to trace back to real upstream Linux source. No proprietary code dressed up as Linux. This document is the evidence for that requirement.
 
 ## Summary
 
@@ -88,14 +87,11 @@ $ diff upstream-v5.10/ptrace.c sophgo-porting-commit/ptrace.c
 
 ### Verdict
 
-The kernel meets the hard requirement. It is upstream Linux 5.10.4, traceable through the git history, with the vendor additions clearly separated in one commit.
-It is also not abandoned. Upstream Linux 5.10 is a longterm release and still gets fixes, the Sophgo fork mirrors that with the weekly stable releases. The last upstream commit was `3a323bc2` "Linux 5.10.274" on 2026-11-06, the last fork commit `2d84ae4338` on 2026-10-28.
-**The kernel is behind, not unmaintained.** What a newer kernel would cost is in [kernel-upgrade.md](./kernel-upgrade.md).
+The kernel meets the hard requirement. It is upstream Linux 5.10.4, traceable through the git history, with the vendor additions clearly separated in one commit. It is also not abandoned. Upstream Linux 5.10 is a longterm release and still gets fixes, the Sophgo fork mirrors that with the weekly stable releases. The last upstream commit was `3a323bc2` "Linux 5.10.274" on 2026-11-06, the last fork commit `2d84ae4338` on 2026-10-28. **The kernel is behind, not unmaintained.** What a newer kernel would cost is in [kernel-upgrade.md](./kernel-upgrade.md).
 
 ### Why not a newer kernel
 
-This is the real reason the kernel is 5.10 and not 6.x or 7.x, and it is not Sophgo being lazy. The camera drivers are not in the kernel at all.
-`drivers/media/platform/cvitek/` in the kernel tree contains only a `Kconfig` file. The actual drivers live in `osdrv/interdrv/`:
+This is the real reason the kernel is 5.10 and not 6.x or 7.x, and it is not Sophgo being lazy. The camera drivers are not in the kernel at all. `drivers/media/platform/cvitek/` in the kernel tree contains only a `Kconfig` file. The actual drivers live in `osdrv/interdrv/`:
 
 ```
 osdrv/interdrv/cif/       MIPI receiver
@@ -125,14 +121,12 @@ $ grep -rn "class_create(" osdrv/interdrv/ | grep -v THIS_MODULE
 (no result)
 ```
 
-Every call is the two argument form `class_create(THIS_MODULE, name)`, which was removed in kernel 6.4. Porting the camera drivers to a 6.4+ kernel means going through all of `osdrv/interdrv` and fixing the API breaks.
-Two more version facts, so the list is complete:
+Every call is the two argument form `class_create(THIS_MODULE, name)`, which was removed in kernel 6.4. Porting the camera drivers to a 6.4+ kernel means going through all of `osdrv/interdrv` and fixing the API breaks. Two more version facts, so the list is complete:
 
 - **`set_fs()`** is an architecture implementation on RISC-V in
 `arch/riscv/include/asm/uaccess.h`. It is gone from 6.1 on. There are 174 call sites in `osdrv`, but 173 of them are in old WiFi driver trees for chips the camera does not have. One is in the camera path.
 - **`clk_hw_register_clkdev()`** is *not* removed. It is still declared in
-`include/linux/clkdev.h` with an unchanged signature, all the way up to v7.3. The CVI clock driver uses it, the modernized 6.18 driver uses `devm_clk_hw_register` instead. That is a cleanup, not a port.
-The full breakdown with the numbers is in [kernel-upgrade.md](./kernel-upgrade.md).
+`include/linux/clkdev.h` with an unchanged signature, all the way up to v7.3. The CVI clock driver uses it, the modernized 6.18 driver uses `devm_clk_hw_register` instead. That is a cleanup, not a port. The full breakdown with the numbers is in [kernel-upgrade.md](./kernel-upgrade.md).
 
 ### What the newer Sophgo kernels have
 
@@ -143,16 +137,11 @@ The full breakdown with the numbers is in [kernel-upgrade.md](./kernel-upgrade.m
 | `sophgo/linux-riscv` master | 6.18, active | none | SoC only |
 | `torvalds/linux` | 7.4-rc2, active | none | SoC only |
 
-`sophgo/linux-riscv` at 6.18 has `sg2002.dtsi`, but only with the clock, plic, clint, sdhci and pinctrl. There is no `drivers/media/platform/sophgo`, no `drivers/clk/cvitek`, no `drivers/soc/cvitek`. Mainline has the same: the SG2002 support is SoC level only.
-So a newer kernel does not exist for this camera. The 6.8 branch in `sophgo/linux` is frozen at January 2024 and has no CVI drivers either.
-The SoC part is in good shape though. Mainline has the modernized clock driver `drivers/clk/sophgo/clk-cv1800.c`, the pinctrl, the sound codec drivers, the SDHCI host and the mailbox binding. The DesignWare DMA controller of the CV181X is also upstream, as `drivers/dma/dw/`.
-What is missing is only the video pipeline, and that lives in `osdrv`. The details are in [kernel-upgrade.md](./kernel-upgrade.md).
+`sophgo/linux-riscv` at 6.18 has `sg2002.dtsi`, but only with the clock, plic, clint, sdhci and pinctrl. There is no `drivers/media/platform/sophgo`, no `drivers/clk/cvitek`, no `drivers/soc/cvitek`. Mainline has the same: the SG2002 support is SoC level only. So a newer kernel does not exist for this camera. The 6.8 branch in `sophgo/linux` is frozen at January 2024 and has no CVI drivers either. The SoC part is in good shape though. Mainline has the modernized clock driver `drivers/clk/sophgo/clk-cv1800.c`, the pinctrl, the sound codec drivers, the SDHCI host and the mailbox binding. The DesignWare DMA controller of the CV181X is also upstream, as `drivers/dma/dw/`. What is missing is only the video pipeline, and that lives in `osdrv`. The details are in [kernel-upgrade.md](./kernel-upgrade.md).
 
 ### The honest position
 
-The kernel is as clean as it can be for this hardware: real upstream Linux, maintained with weekly stable releases, one clearly separated vendor commit.
-What is not clean is that the camera drivers are out of tree in `osdrv`, written against a 5.10 API. Porting them into the kernel tree as proper in-tree drivers, and then onto a current kernel, is a large project with no upstream to merge into. Nobody else does this for this chip.
-**Recommendation:** keep the 5.10 kernel. Track the weekly stable releases, they are the security updates. Do not spend the effort on a 6.x port, the driver work is the expensive part and there is no upstream to merge into. The details are in [kernel-upgrade.md](./kernel-upgrade.md).
+The kernel is as clean as it can be for this hardware: real upstream Linux, maintained with weekly stable releases, one clearly separated vendor commit. What is not clean is that the camera drivers are out of tree in `osdrv`, written against a 5.10 API. Porting them into the kernel tree as proper in-tree drivers, and then onto a current kernel, is a large project with no upstream to merge into. Nobody else does this for this chip. **Recommendation:** keep the 5.10 kernel. Track the weekly stable releases, they are the security updates. Do not spend the effort on a 6.x port, the driver work is the expensive part and there is no upstream to merge into. The details are in [kernel-upgrade.md](./kernel-upgrade.md).
 
 ## The other forks
 
@@ -174,17 +163,12 @@ ab7661e7  2024-01-30  buildroot: weekly update 2023-04-26
 4e338c31  2025-12-25  (buildroot): add link options for musl toochain
 ```
 
-Three of them are stable updates for a newer release line, one is the toolchain support that predates the 2021.05 tag.
-Two of them touch external packages and are worth a look:
+Three of them are stable updates for a newer release line, one is the toolchain support that predates the 2021.05 tag. Two of them touch external packages and are worth a look:
 
 - `package/freetype/0001-fix-TOP_DIR-value-error-for-CVITEK-platform.patch`
 - `package/zlog/0001-mod-if-DEBUG-equal-0-then-enable-debug-info-output.patch`
 
-Neither package is needed in a camera image. `freetype` is a font library, only useful with a text renderer. `zlog` is a logging library from the Sophgo SDK. Both patches can go with the packages.
-`package/busybox/busybox.config` is the busybox configuration. It is worth reading, it is the config that defines what the shell and the applets in the image can do.
-The init scripts in `board/cvitek/CV181X/overlay/etc/init.d/` are the ones that start the services. `S99user` is the interesting one, it sources `/mnt/system/auto.sh` which starts the vendor application.
-**Buildroot 2021.05 is end of life.** The upstream branch got its last commit in June 2021 and no security fixes since. That matters, because the image carries dropbear, busybox and openssl from it.
-There is a `buildroot-2023.11` branch in the same Sophgo repo, but it has no CV181X support:
+Neither package is needed in a camera image. `freetype` is a font library, only useful with a text renderer. `zlog` is a logging library from the Sophgo SDK. Both patches can go with the packages. `package/busybox/busybox.config` is the busybox configuration. It is worth reading, it is the config that defines what the shell and the applets in the image can do. The init scripts in `board/cvitek/CV181X/overlay/etc/init.d/` are the ones that start the services. `S99user` is the interesting one, it sources `/mnt/system/auto.sh` which starts the vendor application. **Buildroot 2021.05 is end of life.** The upstream branch got its last commit in June 2021 and no security fixes since. That matters, because the image carries dropbear, busybox and openssl from it. There is a `buildroot-2023.11` branch in the same Sophgo repo, but it has no CV181X support:
 
 ```
 $ gh api /repos/sophgo/buildroot-2021.05/contents/board/sophgo?ref=buildroot-2023.11
@@ -194,16 +178,14 @@ cv186ah_wevb_emmc
 edge_buildroot
 ```
 
-No `CV181X`. The board folder is also renamed from `cvitek` to `sophgo` there. So 2021.05 is the only Buildroot that can build this camera, with the Sophgo delta on top.
-**Recommendation:** stay on 2021.05. Then watch the three packages that carry the attack surface:
+No `CV181X`. The board folder is also renamed from `cvitek` to `sophgo` there. So 2021.05 is the only Buildroot that can build this camera, with the Sophgo delta on top. **Recommendation:** stay on 2021.05. Then watch the three packages that carry the attack surface:
 
 - **dropbear**: the SSH server. Check the version in the image against the
 upstream advisories.
 - **busybox**: the shell and the init. Check the version, the `ash` shell and
 the applets have had CVEs.
 - **openssl**: needed by `wpa_supplicant_s1g` for WPA2/WPA3. It stays, so its
-version needs to be checked.
-If any of them is too old, the practical option is to bump the single package in the Buildroot fork rather than to move the whole tree. A newer Buildroot would need the CV181X board support ported over, which is more work than patching one package.
+version needs to be checked. If any of them is too old, the practical option is to bump the single package in the Buildroot fork rather than to move the whole tree. A newer Buildroot would need the CV181X board support ported over, which is more work than patching one package.
 
 ### u-boot
 
@@ -225,8 +207,7 @@ $ gh api /repos/sophgo/opensbi/compare/v1.2...sg200x-dev
 ahead=10 behind=381
 ```
 
-Ten commits ahead of upstream v1.2. The 381 behind are upstream commits after v1.2. OpenSBI is a small, well reviewed project and the delta is small enough to audit by hand.
-The own commits are the same pattern as the kernel:
+Ten commits ahead of upstream v1.2. The 381 behind are upstream commits after v1.2. OpenSBI is a small, well reviewed project and the delta is small enough to audit by hand. The own commits are the same pattern as the kernel:
 
 ```
 ba54b003  2024-02-14  note: sync patch from T-Head.
@@ -237,9 +218,7 @@ plus the weekly stable releases. The T-Head patch is a sync of an upstream vendo
 
 ### FreeRTOS
 
-`FreeRTOS-Kernel` and `Lab-Project-FreeRTOS-POSIX` are forks of the FreeRTOS projects, last touched February 2024, and upstream has moved on (FreeRTOS-Kernel V11.3.3, October 2026).
-The RTOS runs on the second core of the SG2002. The camera does not need it. `CONFIG_ENABLE_FREERTOS=y` in the defconfig is what pulls it in.
-**Recommendation:** drop FreeRTOS from the minimal image. The defconfig has `CONFIG_ENABLE_FREERTOS`, `CONFIG_ENABLE_RTOS_DUMP_PRINT` and `CONFIG_DUMP_PRINT_SZ_IDX`, all three go. That removes `freertos`, `FreeRTOS-Kernel` and `Lab-Project-FreeRTOS-POSIX` from the build.
+`FreeRTOS-Kernel` and `Lab-Project-FreeRTOS-POSIX` are forks of the FreeRTOS projects, last touched February 2024, and upstream has moved on (FreeRTOS-Kernel V11.3.3, October 2026). The RTOS runs on the second core of the SG2002. The camera does not need it. `CONFIG_ENABLE_FREERTOS=y` in the defconfig is what pulls it in. **Recommendation:** drop FreeRTOS from the minimal image. The defconfig has `CONFIG_ENABLE_FREERTOS`, `CONFIG_ENABLE_RTOS_DUMP_PRINT` and `CONFIG_DUMP_PRINT_SZ_IDX`, all three go. That removes `freertos`, `FreeRTOS-Kernel` and `Lab-Project-FreeRTOS-POSIX` from the build.
 
 ### flatbuffers
 
@@ -251,8 +230,7 @@ These are the files that are not source code. This is the part that matters most
 
 ### live555.tar.gz: a real blob
 
-`sophgo/oss` at `oss_release_tarball/musl_riscv64/live555.tar.gz` contains the
-Live555 headers and **compiled libraries**:
+`sophgo/oss` at `oss_release_tarball/musl_riscv64/live555.tar.gz` contains the Live555 headers and **compiled libraries**:
 
 ```
 $ tar tzf live555.tar.gz | grep -cE '\.(h|hh)$'
@@ -284,20 +262,16 @@ The tarball also carries `bin/live555MediaServer`. That binary is not used by `c
 
 #### The headers are verified upstream code
 
-All 181 headers were compared against the `rgaufman/live555` Git mirror,
-which mirrors the official source. The blob is Live555 **2020.07.21**.
+All 181 headers were compared against the `rgaufman/live555` Git mirror, which mirrors the official source. The blob is Live555 **2020.07.21**.
 
 ```
 live.2020.04.24   175 of 181 headers byte identical
                    6 differ, 4 of them only in the version string
 ```
 
-The version files say `2020.07.21` instead of `2020.04.24`, which makes the
-blob one release newer than the compared commit. The other two differences
-are `liveMedia.hh`, an include list, and `ProxyServerMediaSession.hh`.
+The version files say `2020.07.21` instead of `2020.04.24`, which makes the blob one release newer than the compared commit. The other two differences are `liveMedia.hh`, an include list, and `ProxyServerMediaSession.hh`.
 
-**There is no injected code in the headers.** They are unmodified upstream
-Live555.
+**There is no injected code in the headers.** They are unmodified upstream Live555.
 
 #### The archives are not verifiable
 
@@ -311,16 +285,11 @@ $ strings lib/libUsageEnvironment.a | grep GCC
 GCC: (Xuantie-900 linux-5.10.4 musl gcc Toolchain V2.6.1 B-20220906) 10.2.0
 ```
 
-Compiled objects, no source. Built with the Sophgo cross compiler, not with
-the upstream build. The source is identifiable and matches upstream, but the
-compiled artifacts cannot be checked against a reference build without
-reproducing the vendor toolchain.
+Compiled objects, no source. Built with the Sophgo cross compiler, not with the upstream build. The source is identifiable and matches upstream, but the compiled artifacts cannot be checked against a reference build without reproducing the vendor toolchain.
 
 #### The Buildroot package needs a fix
 
-Live555 itself is not shady. It is a well known project (LGPL-3.0, mirrored
-at `rgaufman/live555`, last push July 2026). And Buildroot has a package for
-it:
+Live555 itself is not shady. It is a well known project (LGPL-3.0, mirrored at `rgaufman/live555`, last push July 2026). And Buildroot has a package for it:
 
 ```
 package/live555/live555.mk:
@@ -338,8 +307,7 @@ http://www.live555.com/liveMedia/public/live.2020.05.21.tar.gz   404
 http://www.live555.com/liveMedia/public/live.2025.10.13.tar.gz   404
 ```
 
-The homepage loads, the `public/` directory does not. The package has to
-switch to a Git clone against the mirror with a pinned commit.
+The homepage loads, the `public/` directory does not. The package has to switch to a Git clone against the mirror with a pinned commit.
 
 **Recommendation:** build live555 from source with the Buildroot package and point `cvi_rtsp` at it. The `cvi_rtsp` build already supports this, its `build.sh` looks for `LIVE555_DIR` first and only falls back to the download:
 
@@ -349,8 +317,7 @@ if [ "${LIVE555_DIR}" = "" ]; then
 fi
 ```
 
-So the switch is: set `LIVE555_DIR` to the Buildroot build and the blob is never fetched. The Buildroot package installs the same four static libraries plus `live555MediaServer`, so the `Makefile.inc` paths work unchanged.
-Two details to get right in the build:
+So the switch is: set `LIVE555_DIR` to the Buildroot build and the blob is never fetched. The Buildroot package installs the same four static libraries plus `live555MediaServer`, so the `Makefile.inc` paths work unchanged. Two details to get right in the build:
 
 - The Buildroot package builds with `BR2_STATIC_LIBS=y` into
 `linux` config, with `linux-with-shared-libraries` otherwise. The `cvi_rtsp` Makefile expects static archives, so `BR2_STATIC_LIBS=y`.
@@ -381,9 +348,7 @@ Mostly fine. Classified by content:
 
 Only live555 and opencv_aisdk are real blobs. The rest ship the source and build it.
 
-The live555 headers were verified against the upstream source and are
-unmodified. The four archives are compiled objects without source, built
-with the vendor toolchain, so they do not count as verifiable.
+The live555 headers were verified against the upstream source and are unmodified. The four archives are compiled objects without source, built with the vendor toolchain, so they do not count as verifiable.
 
 ### The reCamera.zip
 
@@ -402,8 +367,7 @@ dev, feat/multi-model, feat/ov5647-5mp, feature/halow, feature/sensecraft-classi
 fix/ae-feedback, main, supervisor, yolo26
 ```
 
-No `reCamera`. The package is already broken, so it cannot be in any recent upstream build either.
-**Recommendation:** remove it. It carries the web UI and the device manager, not the camera.
+No `reCamera`. The package is already broken, so it cannot be in any recent upstream build either. **Recommendation:** remove it. It carries the web UI and the device manager, not the camera.
 
 ### The one local patch
 
@@ -413,13 +377,11 @@ No `reCamera`. The package is already broken, so it cannot be in any recent upst
 0001-emit-H264-sprop-parameter-sets-in-SDP.patch
 ```
 
-It adds the H264 SPS and PPS parameter sets to the SDP, so that a client can decode the stream without a separate request. The patch is well written and documented, it explains the Annex-B parsing in the comment.
-This is a local patch, not upstream code. It is a good one and it is needed for the RTSP server to work with normal players. Two options: keep it as a patch, or send it upstream to `sophgo/cvi_rtsp`. Keeping it as a patch is fine, the patch is in the repo and readable.
+It adds the H264 SPS and PPS parameter sets to the SDP, so that a client can decode the stream without a separate request. The patch is well written and documented, it explains the Annex-B parsing in the comment. This is a local patch, not upstream code. It is a good one and it is needed for the RTSP server to work with normal players. Two options: keep it as a patch, or send it upstream to `sophgo/cvi_rtsp`. Keeping it as a patch is fine, the patch is in the repo and readable.
 
 ## The TPU stack
 
-`cviruntime`, `cvikernel`, `cvimath`, `cvibuilder`, `cnpy`, `tdl_sdk` and `flatbuffers` are the AI accelerator SDK. They exist to run the sscma models. A camera does not need them.
-`ive` is different. It is the image processing engine, it does histogram, threshold, alpha blend and similar operations. The ISP tuning and some of the video pipeline use it. Keep it.
+`cviruntime`, `cvikernel`, `cvimath`, `cvibuilder`, `cnpy`, `tdl_sdk` and `flatbuffers` are the AI accelerator SDK. They exist to run the sscma models. A camera does not need them. `ive` is different. It is the image processing engine, it does histogram, threshold, alpha blend and similar operations. The ISP tuning and some of the video pipeline use it. Keep it.
 
 ## What is left after the trimming
 

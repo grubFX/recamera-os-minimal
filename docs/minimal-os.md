@@ -1,7 +1,6 @@
 # Minimal reCamera OS
 
-Goal: a small, understandable image for the Seeed reCamera (SG2002 / CV181X).
-Kept:
+Goal: a small, understandable image for the Seeed reCamera (SG2002 / CV181X). Kept:
 
 - Camera: sensor, ISP, video encoding, RTSP
 - ONVIF, so the camera shows up in an NVR or VMS on its own
@@ -30,10 +29,7 @@ The upstream `sg2002_recamera_emmc` build is Buildroot 2021.05 (Sophgo fork) plu
 | RTSP | `cvi_rtsp` | The RTSP server. Source. |
 | Init | `ramdisk` overlay | The overlayfs setup on the userdata partition. |
 
-None of these are patches on top of upstream Linux. They are the vendor tree, and they cannot be removed without losing the camera.
-The kernel is not old because nobody cares. The camera drivers in `osdrv` use `class_create(THIS_MODULE, name)`, which was removed in kernel 6.4, and the version guards in the sources stop at 5.10. A newer kernel exists for the SoC, but not for the camera.
-Upstream Linux 5.10 is still a maintained longterm release, the fork gets the weekly stable releases. The kernel is behind, not abandoned.
-What a port to 6.4 or 7.x would cost is in [kernel-upgrade.md](./kernel-upgrade.md).
+None of these are patches on top of upstream Linux. They are the vendor tree, and they cannot be removed without losing the camera. The kernel is not old because nobody cares. The camera drivers in `osdrv` use `class_create(THIS_MODULE, name)`, which was removed in kernel 6.4, and the version guards in the sources stop at 5.10. A newer kernel exists for the SoC, but not for the camera. Upstream Linux 5.10 is still a maintained longterm release, the fork gets the weekly stable releases. The kernel is behind, not abandoned. What a port to 6.4 or 7.x would cost is in [kernel-upgrade.md](./kernel-upgrade.md).
 
 ### Parts that go
 
@@ -59,19 +55,15 @@ What a port to 6.4 or 7.x would cost is in [kernel-upgrade.md](./kernel-upgrade.
 
 ### Bluetooth: a hardware question
 
-The reCamera board carries a Morse mm610x HaLow chip and a BCM43012 for 2.4/5 GHz WiFi. The `bt-init` package patches the BCM firmware at boot. Bluetooth is not needed for the camera, so the package goes, unless the WiFi chip turns out to need it.
-Bluetooth is only on the `w` variant of the core board. The C1-2002w carries the WiFi/Bluetooth module, the C1-2002 does not.
+The reCamera board carries a Morse mm610x HaLow chip and a BCM43012 for 2.4/5 GHz WiFi. The `bt-init` package patches the BCM firmware at boot. Bluetooth is not needed for the camera, so the package goes, unless the WiFi chip turns out to need it. Bluetooth is only on the `w` variant of the core board. The C1-2002w carries the WiFi/Bluetooth module, the C1-2002 does not.
 
 ### The auto update
 
-`auto_download.sh` polls the GitHub release feed of `reCamera-OS` every 60 seconds and installs whatever it finds. `S99user` starts it through `/mnt/system/auto.sh`, the same script that starts the vendor application.
-Both go. A camera that installs new firmware from the internet on its own is not a normal Linux system, and it is also the path that pulls the prebuilt `reCamera.zip` content into the image.
+`auto_download.sh` polls the GitHub release feed of `reCamera-OS` every 60 seconds and installs whatever it finds. `S99user` starts it through `/mnt/system/auto.sh`, the same script that starts the vendor application. Both go. A camera that installs new firmware from the internet on its own is not a normal Linux system, and it is also the path that pulls the prebuilt `reCamera.zip` content into the image.
 
 ## How the image is put together
 
-The build is driven by `external/configs/sg2002_recamera_emmc_defconfig`. It picks the chip, the board, the DDR config, the sensor and a set of packages.
-The external packages live in `external/br2-external/`. The `Config.in` of each package decides whether it is in the image, and the `.mk` describes how it is built. The `external/br2-external/Config.in` lists the packages that Buildroot knows about.
-Two kinds of packages:
+The build is driven by `external/configs/sg2002_recamera_emmc_defconfig`. It picks the chip, the board, the DDR config, the sensor and a set of packages. The external packages live in `external/br2-external/`. The `Config.in` of each package decides whether it is in the image, and the `.mk` describes how it is built. The `external/br2-external/Config.in` lists the packages that Buildroot knows about. Two kinds of packages:
 
 - `sscma-supervisor`, `sscma-node`, `bt-init`, `morse_cli`, `wpa_supplicant_s1g`
 build from the `sscma-example-sg200x` git repo
@@ -79,9 +71,7 @@ build from the `sscma-example-sg200x` git repo
 
 ### Which packages are in the image
 
-This is the mechanism that decides it. The external packages are not listed
-in the buildroot defconfig, they are enabled by their own `Config.in`
-default:
+This is the mechanism that decides it. The external packages are not listed in the buildroot defconfig, they are enabled by their own `Config.in` default:
 
 | Package | Default | In the minimal image |
 |---|---|---|
@@ -96,13 +86,9 @@ default:
 | `sscma-supervisor` | `default y` | no |
 | `wpa_supplicant_s1g` | `default y` | depends on the HaLow decision |
 
-So the trimming is done by flipping the `default` in the `Config.in` of the
-minimal external tree, not by editing the buildroot defconfig.
+So the trimming is done by flipping the `default` in the `Config.in` of the minimal external tree, not by editing the buildroot defconfig.
 
-Two side effects to know about. `sscma-node` selects `mosquitto`, `libhv`,
-`alsa-lib` and `alsa-utils` in its `Config.in`, so dropping it drops those
-as well. And `libhv` has to stay even though `sscma-node` goes, because the
-ONVIF daemon uses it.
+Two side effects to know about. `sscma-node` selects `mosquitto`, `libhv`, `alsa-lib` and `alsa-utils` in its `Config.in`, so dropping it drops those as well. And `libhv` has to stay even though `sscma-node` goes, because the ONVIF daemon uses it.
 
 The buildroot defconfig itself is `external/buildroot/configs/cvitek_CV181X_musl_riscv64_defconfig`, 572 lines with 115 enabled packages. It is derived from the chip and the SDK version, not from the project:
 
@@ -111,13 +97,11 @@ build/envsetup_soc.sh:882
   export BR_DEFCONFIG=${BR_BOARD}_defconfig
 ```
 
-The init scripts come from two places: the packages copy their own rootfs into the target, and `external/ramdisk/rootfs/overlay/` holds the boot overlay.
-The overlay sets up the writable root: `/bin`, `/etc`, `/home`, `/lib`, `/opt`, `/root`, `/sbin`, `/usr` and `/var` are mounted as overlayfs with the lower layer in the read only rootfs and the upper layer in the userdata partition. That is also where the factory reset and the OTA update live.
+The init scripts come from two places: the packages copy their own rootfs into the target, and `external/ramdisk/rootfs/overlay/` holds the boot overlay. The overlay sets up the writable root: `/bin`, `/etc`, `/home`, `/lib`, `/opt`, `/root`, `/sbin`, `/usr` and `/var` are mounted as overlayfs with the lower layer in the read only rootfs and the upper layer in the userdata partition. That is also where the factory reset and the OTA update live.
 
 ## The kernel
 
-The kernel is `sophgo/linux_5.10`. It is worth being precise about what that means, because the vendor tree is not the same thing as a kernel with unknown additions.
-The history of the `sg200x-dev` branch:
+The kernel is `sophgo/linux_5.10`. It is worth being precise about what that means, because the vendor tree is not the same thing as a kernel with unknown additions. The history of the `sg200x-dev` branch:
 
 ```
 b1313fe517  2020-12-30  Greg Kroah-Hartman   Linux 5.10.4
@@ -125,11 +109,7 @@ b4ca5efcaf  2024-02-14  sophgo-forum-service linux porting cvitek asic chips.
 72ef337123  2024-02-14  sophgo-forum-service [fea] Init sg200x-dev branch.
 ```
 
-Everything below the first entry is upstream Linux by the upstream authors. Above it there are three Sophgo commits and then weekly stable releases.
-The porting commit adds the CV181X device trees and the clock, DMA, pinctrl and sound drivers. The changes to `arch/riscv/` are backports from upstream v5.12 and v5.15, verified by diffing against the upstream releases.
-The camera drivers are not in the kernel. They are in `osdrv/interdrv/` and get built as out of tree modules. That is also why the kernel stays at 5.10: the drivers use the two argument `class_create()`, which was removed in kernel 6.4, and the version guards in the sources stop at 5.10.
-A newer kernel exists for the SoC. `sophgo/linux-riscv` is at 6.18 and has the SG2002 support. But it has the clock, plic, sdhci and pinctrl, and no CVI video drivers. Mainline has the same. There is no newer kernel with this camera in it.
-The full evidence is in [submodule-review.md](./submodule-review.md).
+Everything below the first entry is upstream Linux by the upstream authors. Above it there are three Sophgo commits and then weekly stable releases. The porting commit adds the CV181X device trees and the clock, DMA, pinctrl and sound drivers. The changes to `arch/riscv/` are backports from upstream v5.12 and v5.15, verified by diffing against the upstream releases. The camera drivers are not in the kernel. They are in `osdrv/interdrv/` and get built as out of tree modules. That is also why the kernel stays at 5.10: the drivers use the two argument `class_create()`, which was removed in kernel 6.4, and the version guards in the sources stop at 5.10. A newer kernel exists for the SoC. `sophgo/linux-riscv` is at 6.18 and has the SG2002 support. But it has the clock, plic, sdhci and pinctrl, and no CVI video drivers. Mainline has the same. There is no newer kernel with this camera in it. The full evidence is in [submodule-review.md](./submodule-review.md).
 
 ## Build
 
@@ -141,15 +121,10 @@ The build goes through the GitHub workflow, not through Docker.
   run: make ${{ matrix.target }}
 ```
 
-The workflow installs the build dependencies with apt and calls `make`
-directly. The riscv64-musl toolchain and the ccache directory are cached
-between runs, so a rebuild only compiles what changed.
+The workflow installs the build dependencies with apt and calls `make` directly. The riscv64-musl toolchain and the ccache directory are cached between runs, so a rebuild only compiles what changed.
 
-The workflow needs two additions for the minimal target: a matrix entry and
-a `push` trigger on `develop`. Right now it only runs on a tag push or a
-manual dispatch.
+The workflow needs two additions for the minimal target: a matrix entry and a `push` trigger on `develop`. Right now it only runs on a tag push or a manual dispatch.
 
-Locally, the Docker daemon does not run on this machine and systemd is
-offline, so `docker_build.sh` does not work here. The workflow does.
+Locally, the Docker daemon does not run on this machine and systemd is offline, so `docker_build.sh` does not work here. The workflow does.
 
 Output lands in `output/sg2002_recamera_minimal/install/soc_sg2002_recamera_minimal/`.

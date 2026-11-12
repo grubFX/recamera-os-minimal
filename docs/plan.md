@@ -1,7 +1,6 @@
 # Plan: minimal reCamera OS
 
-Every step has a goal, a concrete change and a way to check the result. The check is always a build, never the camera.
-The submodule review in [submodule-review.md](./submodule-review.md) is the evidence for the decisions below.
+Every step has a goal, a concrete change and a way to check the result. The check is always a build, never the camera. The submodule review in [submodule-review.md](./submodule-review.md) is the evidence for the decisions below.
 
 ## Baseline
 
@@ -36,9 +35,7 @@ The build environment on this machine:
 
 ### The build path is CI, not Docker
 
-The GitHub workflow builds without Docker at all. It runs on `ubuntu-24.04`,
-installs the build dependencies with apt, and calls `make <target>` directly.
-The riscv64-musl toolchain and the ccache directory are cached between runs.
+The GitHub workflow builds without Docker at all. It runs on `ubuntu-24.04`, installs the build dependencies with apt, and calls `make <target>` directly. The riscv64-musl toolchain and the ccache directory are cached between runs.
 
 ```
 .github/workflows/main.yml
@@ -46,25 +43,17 @@ The riscv64-musl toolchain and the ccache directory are cached between runs.
   run: make ${{ matrix.target }}
 ```
 
-This was found while planning and it changes the setup. The workflow needs
-two changes to build the minimal target:
+This was found while planning and it changes the setup. The workflow needs two changes to build the minimal target:
 
 - A matrix entry for the new target.
-- A trigger on `push` to `develop`, so a build runs on every commit instead
-  of only on a tag.
+- A trigger on `push` to `develop`, so a build runs on every commit instead of only on a tag.
 
-The workflow currently only runs on a tag push or a manual dispatch, and it
-reads the CHANGELOG to decide what to build. For the minimal target the
-CHANGELOG entry has to exist under the target name, same as the vendor
-targets.
+The workflow currently only runs on a tag push or a manual dispatch, and it reads the CHANGELOG to decide what to build. For the minimal target the CHANGELOG entry has to exist under the target name, same as the vendor targets.
 
 Two other things the CI gives for free:
 
-- The Node.js build is the expensive part. The comment in the workflow says
-  "V8/nodejs compile alone needs ~4.5h on a 4-core runner". The minimal image
-  has no Node.js, so the build is much faster.
-- The toolchain cache is keyed on `riscv64-musl-gcc-ubuntu-24.04-2026.10.21`
-  and does not depend on the target, so the minimal build reuses it.
+- The Node.js build is the expensive part. The comment in the workflow says "V8/nodejs compile alone needs ~4.5h on a 4-core runner". The minimal image has no Node.js, so the build is much faster.
+- The toolchain cache is keyed on `riscv64-musl-gcc-ubuntu-24.04-2026.10.21` and does not depend on the target, so the minimal build reuses it.
 
 ### Step 0.2: Baseline inventory
 
@@ -107,8 +96,7 @@ The upstream build mixes the camera and the app stack in one external tree. The 
 
 ### How the build is wired
 
-This was traced through the build scripts, because it decides what the
-minimal tree has to look like.
+This was traced through the build scripts, because it decides what the minimal tree has to look like.
 
 ```
 Makefile                       the target list comes from external/configs/*_defconfig
@@ -120,25 +108,19 @@ build/Makefile                 make -C buildroot-2021.05 <BR_DEFCONFIG>
 
 Two things follow from this:
 
-- `BR2_EXTERNAL` is a single directory, set in `external/build.sh`. A second
-  external tree needs its own copy of that script, or a parameter.
-- The buildroot defconfig is always `cvitek_CV181X_musl_riscv64_defconfig`.
-  It is derived from the chip and the SDK version, not from the project:
+- `BR2_EXTERNAL` is a single directory, set in `external/build.sh`. A second external tree needs its own copy of that script, or a parameter.
+- The buildroot defconfig is always `cvitek_CV181X_musl_riscv64_defconfig`. It is derived from the chip and the SDK version, not from the project:
 
 ```
 build/envsetup_soc.sh:882
   export BR_DEFCONFIG=${BR_BOARD}_defconfig
 ```
 
-So the package selection for the minimal image cannot live in a new
-buildroot defconfig file without changing that line. The practical way is to
-keep the buildroot defconfig and let the external tree override the
-packages.
+So the package selection for the minimal image cannot live in a new buildroot defconfig file without changing that line. The practical way is to keep the buildroot defconfig and let the external tree override the packages.
 
 ### Where the external packages are enabled
 
-The external packages are not listed in the buildroot defconfig. They are
-enabled by their own `Config.in` defaults:
+The external packages are not listed in the buildroot defconfig. They are enabled by their own `Config.in` defaults:
 
 ```
 external/br2-external/bt-init/Config.in       default y
@@ -149,12 +131,9 @@ external/br2-external/sscma-supervisor/Config.in  default y
 external/br2-external/reCamera/Config.in       default n
 ```
 
-That is the mechanism. A package with `default y` is built unless the
-defconfig says otherwise, and the defconfig does not mention any of them.
+That is the mechanism. A package with `default y` is built unless the defconfig says otherwise, and the defconfig does not mention any of them.
 
-For the minimal tree this is the lever. Every package that should not be in
-the image gets `default n`, and the ones that stay get `default y` without
-touching the buildroot defconfig.
+For the minimal tree this is the lever. Every package that should not be in the image gets `default n`, and the ones that stay get `default y` without touching the buildroot defconfig.
 
 | | |
 |---|---|
@@ -178,14 +157,9 @@ touching the buildroot defconfig.
 | Change | New file `external/configs/sg2002_recamera_minimal_defconfig`, based on the upstream one. |
 | Check | `make sg2002_recamera_minimal` picks up the new target. The Makefile derives the targets from the files in `external/configs/`. |
 
-The defconfig starts as a copy of the upstream one. The trimming happens in
-the packages, not in the defconfig, because most of the removed parts are not
-buildroot packages at all.
+The defconfig starts as a copy of the upstream one. The trimming happens in the packages, not in the defconfig, because most of the removed parts are not buildroot packages at all.
 
-The upstream defconfig is 32 lines and sets the project level: the chip, the
-board, the DDR config, the cross compiler, the sensor, the storage type and
-the kernel. None of that changes for the minimal image, it is the same
-camera.
+The upstream defconfig is 32 lines and sets the project level: the chip, the board, the DDR config, the cross compiler, the sensor, the storage type and the kernel. None of that changes for the minimal image, it is the same camera.
 
 ```
 CONFIG_CHIP_sg2002=y
@@ -195,8 +169,7 @@ CONFIG_SENSOR_OV_OV5647=y
 CONFIG_STORAGE_TYPE_emmc=y
 ```
 
-The packages are in the buildroot defconfig, 572 lines with 115 enabled
-packages. That is the file the trimming touches, not the project defconfig.
+The packages are in the buildroot defconfig, 572 lines with 115 enabled packages. That is the file the trimming touches, not the project defconfig.
 
 | | |
 |---|---|
@@ -287,8 +260,7 @@ Bluetooth is only on the `w` variant of the core board. The C1-2002w carries the
 
 #### What the live555 blob actually is
 
-The blob was checked against the upstream source. The result is good news
-with one caveat.
+The blob was checked against the upstream source. The result is good news with one caveat.
 
 ```
 oss/oss_release_tarball/musl_riscv64/live555.tar.gz
@@ -297,21 +269,16 @@ oss/oss_release_tarball/musl_riscv64/live555.tar.gz
   bin/        45 example binaries
 ```
 
-The headers were compared file by file against the `rgaufman/live555` Git
-mirror, which is an unofficial but faithful mirror of the official source.
+The headers were compared file by file against the `rgaufman/live555` Git mirror, which is an unofficial but faithful mirror of the official source.
 
 ```
 live.2020.04.24   175 of 181 headers byte identical
                    6 differ, 4 of them only in the version string
 ```
 
-The six differences are the version files. They say `2020.07.21` instead of
-`2020.04.24`, so the blob is one release newer than the commit that was
-compared. The remaining two are `liveMedia.hh`, which is an include list,
-and `ProxyServerMediaSession.hh`.
+The six differences are the version files. They say `2020.07.21` instead of `2020.04.24`, so the blob is one release newer than the commit that was compared. The remaining two are `liveMedia.hh`, which is an include list, and `ProxyServerMediaSession.hh`.
 
-**The headers are unmodified upstream Live555 code.** There is no injected
-code in them.
+**The headers are unmodified upstream Live555 code.** There is no injected code in them.
 
 The caveat is the archives:
 
@@ -322,20 +289,15 @@ lib/libUsageEnvironment.a
   strDup.o
 ```
 
-They contain compiled objects, not source. And the objects carry the build
-signature of the vendor toolchain:
+They contain compiled objects, not source. And the objects carry the build signature of the vendor toolchain:
 
 ```
 GCC: (Xuantie-900 linux-5.10.4 musl gcc Toolchain V2.6.1 B-20220906) 10.2.0
 ```
 
-So the blob is Live555 2020.07.21, compiled by Sophgo with their cross
-compiler. The source is identifiable and matches upstream, but the compiled
-artifacts cannot be verified byte by byte against a reference build without
-reproducing the vendor toolchain.
+So the blob is Live555 2020.07.21, compiled by Sophgo with their cross compiler. The source is identifiable and matches upstream, but the compiled artifacts cannot be verified byte by byte against a reference build without reproducing the vendor toolchain.
 
-This is exactly what the hard requirement forbids, so the step stays. The
-Buildroot package builds the same version from source with a checked hash.
+This is exactly what the hard requirement forbids, so the step stays. The Buildroot package builds the same version from source with a checked hash.
 
 | | |
 |---|---|
@@ -353,9 +315,7 @@ http://www.live555.com/liveMedia/public/live.2021.05.03.tar.gz   404
 http://www.live555.com/liveMedia/public/live.2025.10.13.tar.gz   404
 ```
 
-The homepage loads, but the `public/` directory does not. The Buildroot
-package points at that URL with an `md5` and a `sha256`, so the build would
-fail with a download error.
+The homepage loads, but the `public/` directory does not. The Buildroot package points at that URL with an `md5` and a `sha256`, so the build would fail with a download error.
 
 The Git mirror works and is the way to fix this:
 
@@ -365,9 +325,7 @@ https://github.com/rgaufman/live555
   mirror of the official source, tracks the upstream releases
 ```
 
-The package has to switch from a tarball download to a Git clone with a
-pinned tag. The upstream release tags are in the history as "Version bump
-to YYYY.MM.DD" commits, not as Git tags, so the pin has to be a commit SHA.
+The package has to switch from a tarball download to a Git clone with a pinned tag. The upstream release tags are in the history as "Version bump to YYYY.MM.DD" commits, not as Git tags, so the pin has to be a commit SHA.
 
 | | |
 |---|---|
@@ -417,14 +375,12 @@ Buildroot 2021.05 is end of life, the upstream branch stopped in June 2021. The 
 
 ## Step 5: Trim the boot overlay
 
-The overlay sets up the writable root. Some of its parts belong to the app layer.
-Two places hold the init scripts:
+The overlay sets up the writable root. Some of its parts belong to the app layer. Two places hold the init scripts:
 
 - `external/buildroot/board/cvitek/CV181X/overlay/etc/init.d/` has `S70hardware`,
 `S80dnsmasq`, `S92node-red`, `S98ttyd` and `S99user`
 - `external/ramdisk/rootfs/overlay/cv181x_musl_riscv64/system/` has the boot
-scripts: `auto.sh`, `auto_download.sh`, `rootfs_overlay.sh`, `upgrade.sh` and the usb networking scripts
-The `S99user` script sources `/mnt/system/auto.sh`, which starts the vendor application. That is the hook to the app layer.
+scripts: `auto.sh`, `auto_download.sh`, `rootfs_overlay.sh`, `upgrade.sh` and the usb networking scripts The `S99user` script sources `/mnt/system/auto.sh`, which starts the vendor application. That is the hook to the app layer.
 
 ### Step 5.1: Keep the overlay, drop the app hooks
 
@@ -629,19 +585,15 @@ The details are in [onvif.md](./onvif.md).
 | 7 | ONVIF | The device service answers, a client sees two profiles |
 | 8 | Flash and verify | The camera boots on the minimal image |
 
-Steps 0 to 2 are the safety net. Nothing is removed before step 3. Every step ends in a build that has to succeed.
-Step 2.3 is the important one: the minimal target builds and has the same content as the baseline. After that, every change is a difference from a known good state.
+Steps 0 to 2 are the safety net. Nothing is removed before step 3. Every step ends in a build that has to succeed. Step 2.3 is the important one: the minimal target builds and has the same content as the baseline. After that, every change is a difference from a known good state.
 
 The plan produces a camera with RTSP and ONVIF. Not a web UI, not a flow editor, not a broker.
 
 ### The build runs in CI
 
-Every step ends in a build, and the build runs in the GitHub workflow. It
-has to, because the local machine has no running Docker daemon and systemd
-is offline.
+Every step ends in a build, and the build runs in the GitHub workflow. It has to, because the local machine has no running Docker daemon and systemd is offline.
 
-The workflow needs to be extended before the first build of the minimal
-target can happen:
+The workflow needs to be extended before the first build of the minimal target can happen:
 
 | | |
 |---|---|
@@ -651,8 +603,7 @@ target can happen:
 | Note | The workflow reads the CHANGELOG to decide what to build, and it looks for the target name under the version heading. A CHANGELOG entry with a `### sg2002_recamera_minimal` section is needed. |
 | Note | The `output/sg2002_recamera_emmc/buildroot-2021.05/dl` cache path in the workflow is hardcoded to the emmc target. A second target needs its own cache path, or the download directory has to be shared. |
 
-The toolchain cache does not depend on the target, so the minimal build
-reuses it.
+The toolchain cache does not depend on the target, so the minimal build reuses it.
 
 ## Open questions
 
@@ -670,19 +621,12 @@ it is its own project. The breakdown is in [kernel-upgrade.md](./kernel-upgrade.
 
 The ones below are answered by the code and do not need a decision:
 
-- **The Docker daemon.** The build goes through CI, it does not need Docker
-  locally. The workflow builds without a container.
-- **The ONVIF port.** 8899, the vendor default. It does not collide with
-  anything in the image.
-- **The crypto library for ONVIF.** There is no choice to make. The vendor
-  implementation uses OpenSSL for SHA1, and OpenSSL is already in the image.
-  No libtomcrypt, no mbedtls, no wolfssl.
+- **The Docker daemon.** The build goes through CI, it does not need Docker locally. The workflow builds without a container.
+- **The ONVIF port.** 8899, the vendor default. It does not collide with anything in the image.
+- **The crypto library for ONVIF.** There is no choice to make. The vendor implementation uses OpenSSL for SHA1, and OpenSSL is already in the image. No libtomcrypt, no mbedtls, no wolfssl.
 
 Still open, and they are additions on top of the extracted module:
 
-- Is the snapshot wanted? Many clients show a thumbnail in the device list, it
-  needs a CGI script that grabs one JPEG.
-- Is PTZ wanted? It needs the CAN interface of the gimbal and four small
-  scripts, plus four ONVIF operations that do not exist yet.
-- Are ONVIF events wanted? Without the AI stack there is no motion detection,
-  so there is nothing to report.
+- Is the snapshot wanted? Many clients show a thumbnail in the device list, it needs a CGI script that grabs one JPEG.
+- Is PTZ wanted? It needs the CAN interface of the gimbal and four small scripts, plus four ONVIF operations that do not exist yet.
+- Are ONVIF events wanted? Without the AI stack there is no motion detection, so there is nothing to report.

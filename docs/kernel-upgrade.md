@@ -1,8 +1,6 @@
 # What a kernel upgrade would take
 
-The question: the camera runs on Linux 5.10. Why not 6.4, or 7.x?
-Short answer: the camera drivers are not in the kernel, they are built out of tree from `osdrv` and written against the 5.10 API. Moving the kernel means moving those drivers with it.
-This document is the breakdown, with the actual numbers.
+The question: the camera runs on Linux 5.10. Why not 6.4, or 7.x? Short answer: the camera drivers are not in the kernel, they are built out of tree from `osdrv` and written against the 5.10 API. Moving the kernel means moving those drivers with it. This document is the breakdown, with the actual numbers.
 
 ## First: 5.10 is not EOL
 
@@ -13,8 +11,7 @@ $ gh api /repos/gregkh/linux/commits?sha=linux-5.10.y&per_page=1
 2026-11-06  3a323bc2  Linux 5.10.274
 ```
 
-Upstream Linux 5.10 is a longterm release and still gets fixes. The Sophgo fork mirrors that with the weekly stable releases, the last one being `2d84ae4338` from 2026-10-28.
-So the kernel is not abandoned. It is behind, but it is maintained.
+Upstream Linux 5.10 is a longterm release and still gets fixes. The Sophgo fork mirrors that with the weekly stable releases, the last one being `2d84ae4338` from 2026-10-28. So the kernel is not abandoned. It is behind, but it is maintained.
 
 ## Where the camera drivers live
 
@@ -29,8 +26,7 @@ osdrv/interdrv/cvi_vc_drv/ encoder and decoder
 osdrv/interdrv/fb/        framebuffer
 ```
 
-They are built as out-of-tree modules with `make KERNEL_DIR=... INSTALL_DIR=.../ko`, from the `osdrv/Makefile`.
-The kernel tree has only the Kconfig stubs for them: `drivers/media/platform/cvitek/Kconfig` and `drivers/video/fbdev/cvitek/Kconfig` contain the menu entries but no driver code.
+They are built as out-of-tree modules with `make KERNEL_DIR=... INSTALL_DIR=.../ko`, from the `osdrv/Makefile`. The kernel tree has only the Kconfig stubs for them: `drivers/media/platform/cvitek/Kconfig` and `drivers/video/fbdev/cvitek/Kconfig` contain the menu entries but no driver code.
 
 ## The version guards stop at 5.10
 
@@ -61,8 +57,7 @@ has to become
 dev->vi_class = class_create(CVI_VI_CLASS_NAME);
 ```
 
-That is a mechanical change, one line each. Not the hard part.
-Where they are:
+That is a mechanical change, one line each. Not the hard part. Where they are:
 
 | Keep | Drop |
 |---|---|
@@ -79,8 +74,7 @@ Only five of them are in the camera path. The rest belong to the AI stack and th
 
 ### 2. `set_fs()`, removed in 5.18
 
-174 call sites, but almost all of them are in old WiFi driver trees that the camera does not use: Realtek rtl8188f, rtl8189fs, rtl8723ds, rtl8821cs, MediaTek mt7603, Bouffalolab bl602c, Broadcom bcmdhd, and the GT9xx touch controller.
-In the camera path there is exactly one:
+174 call sites, but almost all of them are in old WiFi driver trees that the camera does not use: Realtek rtl8188f, rtl8189fs, rtl8723ds, rtl8821cs, MediaTek mt7603, Bouffalolab bl602c, Broadcom bcmdhd, and the GT9xx touch controller. In the camera path there is exactly one:
 
 ```
 osdrv/interdrv/cvi_vc_drv/vcodec/vdi/linux/vdi_osal.c
@@ -90,16 +84,14 @@ in a file close path. Replacing it is a one line change.
 
 ### 3. The clock driver uses the clkdev API
 
-This one looked like a blocker at first and turned out not to be one.
-The CVI clock driver registers its clocks the old way:
+This one looked like a blocker at first and turned out not to be one. The CVI clock driver registers its clocks the old way:
 
 ```c
 clk_hw_register(NULL, hw);
 clk_hw_register_clkdev(hw, cv180x_clk->name, NULL);
 ```
 
-14 call sites in 9.276 lines of clock driver code.
-`clk_hw_register_clkdev` is **not** removed. It is still declared in `include/linux/clkdev.h` with the same signature, all the way up to v7.3:
+14 call sites in 9.276 lines of clock driver code. `clk_hw_register_clkdev` is **not** removed. It is still declared in `include/linux/clkdev.h` with the same signature, all the way up to v7.3:
 
 ```
 $ grep -c clk_hw_register_clkdev v7.3:include/linux/clkdev.h
@@ -126,8 +118,7 @@ So this is a cleanup, not a port. The driver builds against a 6.x kernel with th
 linux_5.10/drivers/dma/cvitek/   1 file, 2.200 lines
 ```
 
-This one needs a closer look, because it is not as bad as it looks.
-The driver is not a CVI invention. It is the Synopsys DesignWare AHB DMA controller, `dw_dmac`:
+This one needs a closer look, because it is not as bad as it looks. The driver is not a CVI invention. It is the Synopsys DesignWare AHB DMA controller, `dw_dmac`:
 
 ```c
 #define DRV_NAME "dw_dmac"
@@ -151,8 +142,7 @@ drivers/dma/dw/of.c
 drivers/dma/dw/platform.c
 ```
 
-with `config DW_DMAC` "Synopsys DesignWare AHB DMA controller" and a `snps,dw-axi-dmac.yaml` binding for the AXI variant.
-So the DMA controller is likely usable from Mainline. What the CVI driver adds on top is the channel count, the CV181X quirks and a workaround for a BM1880 JIRA bug:
+with `config DW_DMAC` "Synopsys DesignWare AHB DMA controller" and a `snps,dw-axi-dmac.yaml` binding for the AXI variant. So the DMA controller is likely usable from Mainline. What the CVI driver adds on top is the channel count, the CV181X quirks and a workaround for a BM1880 JIRA bug:
 
 ```c
 /* #define CONFIG_SYSDMA_JIRA_BUG_BM1880_17 */
@@ -168,8 +158,7 @@ That is a port of a few hundred lines, not a driver written from scratch.
 static inline void cvi_checkpriority(struct task_struct *p, struct sched_attr *attr)
 ```
 
-It pins the vendor threads to a fixed priority list and caps every other realtime task at priority 80. It works by writing directly into `sched_attr`, which is the interface to `sched_setattr`.
-From 6.6 on the scheduler is EEVDF, `sched_attr` gained fields, and the way the core validates and applies priorities changed. This patch has to be rewritten, not adjusted.
+It pins the vendor threads to a fixed priority list and caps every other realtime task at priority 80. It works by writing directly into `sched_attr`, which is the interface to `sched_setattr`. From 6.6 on the scheduler is EEVDF, `sched_attr` gained fields, and the way the core validates and applies priorities changed. This patch has to be rewritten, not adjusted.
 
 ### 6. The file_operations and proc_ops changes
 
@@ -202,8 +191,7 @@ The clock driver is the modernized successor of the 5.10 one. It is smaller (47 
 ret = devm_clk_hw_register(dev, hw);
 ```
 
-instead of the removed `clk_hw_register_clkdev`. It is built against the CV1800 and CV181x clock trees.
-And Mainline has the same, which is the better starting point:
+instead of the removed `clk_hw_register_clkdev`. It is built against the CV1800 and CV181x clock trees. And Mainline has the same, which is the better starting point:
 
 ```
 arch/riscv/boot/dts/sophgo/sg2002.dtsi
@@ -251,7 +239,4 @@ still wanted at all.
 
 ## The honest recommendation
 
-For a camera that should do one thing, the effort is not justified now.
-The kernel gets weekly stable releases with the upstream security fixes. The packages that a network can reach, dropbear, busybox and openssl, are the ones that need attention, and that is a package version bump, not a kernel port.
-The one thing worth doing is keeping the fork up to date with the weekly stable releases. That is already the case.
-If the kernel version becomes a requirement later, the path is the one above: move onto Mainline or the 6.18 Sophgo tree, port the DMA driver, fix `osdrv`.
+For a camera that should do one thing, the effort is not justified now. The kernel gets weekly stable releases with the upstream security fixes. The packages that a network can reach, dropbear, busybox and openssl, are the ones that need attention, and that is a package version bump, not a kernel port. The one thing worth doing is keeping the fork up to date with the weekly stable releases. That is already the case. If the kernel version becomes a requirement later, the path is the one above: move onto Mainline or the 6.18 Sophgo tree, port the DMA driver, fix `osdrv`.
