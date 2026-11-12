@@ -7,8 +7,8 @@
 # When making changes to this file, please check if
 # util-linux-libs/util-linux-libs.mk needs to be updated accordingly as well.
 
-UTIL_LINUX_VERSION_MAJOR = 2.41
-UTIL_LINUX_VERSION = $(UTIL_LINUX_VERSION_MAJOR).3
+UTIL_LINUX_VERSION_MAJOR = 2.36
+UTIL_LINUX_VERSION = $(UTIL_LINUX_VERSION_MAJOR).2
 UTIL_LINUX_SOURCE = util-linux-$(UTIL_LINUX_VERSION).tar.xz
 UTIL_LINUX_SITE = $(BR2_KERNEL_MIRROR)/linux/utils/util-linux/v$(UTIL_LINUX_VERSION_MAJOR)
 
@@ -30,15 +30,17 @@ UTIL_LINUX_DEPENDENCIES = \
 	$(if $(BR2_PACKAGE_UTIL_LINUX_LIBS),util-linux-libs) \
 	$(TARGET_NLS_DEPENDENCIES)
 
+# The release tarball ships a pre-generated 'configure' script.  Patches that
+# touch configure.ac therefore have no effect, because Buildroot runs the
+# shipped script instead of regenerating it.  Enabling AUTORECONF makes
+# Buildroot regenerate configure/config.h.in from the patched configure.ac
+# before configuring.  This pulls in host-autoconf/host-automake/host-libtool
+# as build dependencies, so the result does not depend on tools being
+# installed in the build environment.
+UTIL_LINUX_AUTORECONF = YES
 UTIL_LINUX_CONF_OPTS += \
 	--disable-rpath \
 	--disable-makeinstall-chown
-
-# liblastlog2 needs the sqlite3 library. The image does not use lastlog2 and
-# it does not have sqlite3, so the build fails with "liblastlog2 selected,
-# but required sqlite3 library not available". Turning it off keeps sqlite3
-# out of the image.
-UTIL_LINUX_CONF_OPTS += --disable-liblastlog2
 
 UTIL_LINUX_LINK_LIBS = $(TARGET_NLS_LIBS)
 
@@ -49,10 +51,6 @@ HOST_UTIL_LINUX_CONF_OPTS = \
 	--without-systemd \
 	--with-systemdsystemunitdir=no \
 	--without-python
-
-# The host build needs the same: liblastlog2 wants sqlite3 and the host has
-# no sqlite3 either.
-HOST_UTIL_LINUX_CONF_OPTS += --disable-liblastlog2
 
 ifneq ($(BR2_PACKAGE_UTIL_LINUX_BINARIES)$(BR2_PACKAGE_UTIL_LINUX_CRAMFS)$(BR2_PACKAGE_UTIL_LINUX_FSCK)$(BR2_PACKAGE_UTIL_LINUX_LOSETUP),)
 UTIL_LINUX_SELINUX_MODULES = fstools
