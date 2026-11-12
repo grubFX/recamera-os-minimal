@@ -213,11 +213,56 @@ The supervisor is the one that matters most: it installs its own rootfs and star
 | | |
 |---|---|
 | Goal | WiFi works, without dragging in Bluetooth. |
-| Change | Keep `wpa_supplicant_s1g` and the WiFi kernel modules. Remove `bt-init` and `bluez5_utils`. |
-| Check | The init script `loadsystemko.sh` no longer loads `dot11ah.ko` and `morse.ko`, but still loads `brcmfmac.ko` for the BCM43012 WiFi. |
-| Note | The HaLow chip (`morse.ko`, `dot11ah.ko`) is a separate 802.11ah radio. It is not the normal WiFi. Decide later whether the minimal image wants HaLow, normal WiFi or both. |
+| Change | Keep the WiFi kernel modules and the matching wpa_supplicant. Remove `bt-init` and `bluez5_utils`. |
+| Check | The init script `loadsystemko.sh` loads the radio modules for the board the camera has, and the init script starts the matching supervisor. |
+| Note | **Open.** Which radio the image keeps depends on the board. See below. |
 
 Bluetooth is only on the `w` variant of the core board. The C1-2002w carries the WiFi/Bluetooth module, the C1-2002 does not. The `bt-init` package patches the BCM firmware at boot, which is the part that goes.
+
+#### The two radios
+
+The image carries drivers for two radios, they are not two settings for the same radio:
+
+| Radio | Standard | Driver | Kernel module | Supervisor |
+|---|---|---|---|---|
+| Morse mm610x | 802.11ah, the HaLow band, sub-GHz, kilometres of range | vendor tree in `external/linux/drivers/fgh100m/` | `dot11ah.ko`, `morse.ko` | `wpa_supplicant_s1g` |
+| Broadcom BCM43012 | 802.11ac, 2.4 and 5 GHz | upstream `brcmfmac` | `brcmfmac.ko` | `wpa_supplicant` |
+
+Which one is in the image depends on the core board:
+
+```
+OSHW-reCamera-Series/hardware/recamera-2002/core/c1-2002/README.md
+  C1-2002    No wireless module; exposes additional SDIO/UART signals to the base
+  C1-2002w   Wi-Fi/Bluetooth module, onboard antenna, and I-PEX connector
+```
+
+The plain `C1-2002` has no radio of its own. The base board can supply one over the exposed SDIO or UART signals. The `C1-2002w` has the module onboard.
+
+The gpio sharing makes this a decision with a side effect:
+
+```
+external/ramdisk/rootfs/overlay/cv181x_musl_riscv64/system/ko/loadsystemko.sh
+  [ ! -e /dev/morse_io ] && [ ! -e /dev/mmcblk1 ] && {
+      # gimbal
+      [ -x /usr/bin/gimbal ] && { ... }
+      # PoE
+      ...
+  }
+```
+
+The HaLow radio and the SD card share GPIOs. When the HaLow radio is present the script skips the gimbal init and the PoE pinmux. So dropping one radio can change what the other one can do.
+
+Three options, and the plan takes one of them:
+
+| Option | What stays | When it is the right one |
+|---|---|---|
+| BCM only | `brcmfmac.ko`, `wpa_supplicant` | The camera is on normal WiFi, or it is on Ethernet. The HaLow radio is not needed. |
+| HaLow only | `dot11ah.ko`, `morse.ko`, `wpa_supplicant_s1g` | The camera reports over a long link, the point of the HaLow radio. |
+| Both | everything | The board has both and both are wanted. The most drivers, the most surface. |
+
+The BCM only option is the default for the minimal image, because a normal WiFi is what a laptop or a phone can join. HaLow needs a special concentrator on the other side, and that is not something a normal network has.
+
+**Open:** the board of the target camera has to be confirmed before this step runs. The hardware repository says the standard Basic product is the `2002w` and the HQ PoE product is the plain `C1-2002`.
 
 ### Step 3.4: Keep one SSH server
 
@@ -343,13 +388,14 @@ The package has to switch from a tarball download to a Git clone with a pinned t
 | Check | The inventory has no TPU libraries. The image is smaller. |
 | Note | `ive` stays, it is the image processing engine and not the AI one. |
 
-### Step 3.9: Keep the ISP tuning
+### Step 3.9: Keep the ISP tuning for one sensor
 
 | | |
 |---|---|
 | Goal | The sensor still produces a correct image. |
-| Change | Keep `isp_tuning` and the `CONFIG_SENSOR_*` options. The tuning binaries are copied to `/mnt/system/cfg/param` by `pack_cfg` in `external/setenv.sh`. |
-| Check | The param directory in the image contains the tuning files for the configured sensor. |
+| Change | Keep `isp_tuning` and `CONFIG_SENSOR_OV_OV5647`. Remove `CONFIG_SENSOR_GCORE_GC2053` and `CONFIG_SENSOR_SMS_SC530AI_2L`. The tuning binaries are copied to `/mnt/system/cfg/param` by `pack_cfg` in `external/setenv.sh`. |
+| Check | The param directory in the image contains the tuning files for the OV5647 and nothing for the other two sensors. |
+| Note | **Decision: OV5647.** That is the sensor the standard product ships with, on the S101 sensor board. The GC2053 is the HQ PoE variant, the SC530AI is a third option. Each sensor needs its own ISP tuning, and the ones that are not used are dead weight in the image. |
 
 ## Step 4: Check the packages that carry the attack surface
 
@@ -391,14 +437,59 @@ scripts: `auto.sh`, `auto_download.sh`, `rootfs_overlay.sh`, `upgrade.sh` and th
 | Check | The boot log shows the overlay mounted and the kernel modules loaded. |
 | Note | The factory reset is a safety feature. Keeping it is cheap and saves a bricked camera. |
 
-### Step 5.2: Remove the auto update
+### Step 5.2: Keep the OTA path, remove the automatic polling
 
 | | |
 |---|---|
-| Goal | The camera does not pull new firmware from the internet behind your back. |
-| Change | Remove `auto_download.sh` and the call to it. It polls the GitHub release feed every 60 seconds and installs whatever it finds. |
-| Check | The script is not in the image. Nothing reaches out to github.com at boot. |
-| Note | `S99user` sources `/mnt/system/auto.sh`, and `auto.sh` is what starts the vendor application. Both the auto update and the app start have to go for the image to be self contained. |
+| Goal | The camera can be updated in the field, but it does not pull new firmware from the internet behind your back. |
+| Change | Keep `upgrade.sh` and the `ota.zip` package. Remove `auto_download.sh` and the call to it. |
+| Check | The script is not in the image. Nothing reaches out to github.com at boot. The `upgrade.sh` script is still there and can be run by hand. |
+| Note | `S99user` sources `/mnt/system/auto.sh`, and `auto.sh` is what starts the vendor application and the auto update. The app start has to go, the OTA path stays. |
+
+**Decision: OTA yes.** The camera is reachable over the network, and a field update without taking it apart is worth the complexity.
+
+The mechanism is already good. It has an A/B partition layout with a rollback, and the build already produces the package:
+
+```
+external/ramdisk/rootfs/overlay/cv181x_musl_riscv64/system/upgrade.sh
+  latest    resolve the newest release and write the md5 file
+  download  fetch the ota package
+  start     write fip.bin, boot.emmc and rootfs_ext4.emmc, switch the partition
+  rollback  switch back to the other rootfs
+  recovery  set the factory reset flag
+  clean     remove the downloaded files
+```
+
+The partitions are in the layout already, `rootfs` on `mmcblk0p3` and `rootfs_b` on `mmcblk0p4`, and the U-Boot environment carries `use_part_b`, `boot_cnt`, `boot_failed_limits` and `boot_rollback`.
+
+**What goes is the trigger.** `auto_download.sh` runs an endless loop, polls the release feed every 60 seconds and installs whatever it finds:
+
+```
+external/ramdisk/rootfs/overlay/cv181x_musl_riscv64/system/auto_download.sh
+  while true; do
+      ...
+      sleep $DEFAULT_SLEEP
+  done
+```
+
+That is not an update mechanism. That is the camera rewriting its own root filesystem from the internet with no way for the owner to know what it installs.
+
+**How the update is triggered instead.** A person runs it, over SSH:
+
+```
+upgrade.sh latest                       # resolve the newest release
+upgrade.sh download                     # fetch the package
+upgrade.sh start                        # write it and switch the partition
+upgrade.sh rollback                     # switch back if it did not boot
+```
+
+The SSH route fits the minimal image, it needs no web server. An HTTP endpoint would need an authenticated interface and a web server that is not otherwise in the image.
+
+| | |
+|---|---|
+| Detail | The download URL points at `https://github.com/Seeed-Studio/reCamera-OS/releases/latest`. For the minimal image that has to point at the fork, or the camera would install the vendor image over the minimal one. |
+| Detail | `wget` is called with `--no-check-certificate` in the script. The md5sum is verified against the file, but the transport is not. The script is a candidate for a certificate fix. |
+| Check | The image has `upgrade.sh`, it has `curl` and `wget`, and the `ota.zip` package is in the build output. |
 
 ### Step 5.3: Clean up the init scripts
 
@@ -534,23 +625,18 @@ The details are in [onvif.md](./onvif.md).
 | Check | The process is running and listening. A client that scans finds the camera. |
 | Note | Without this the camera only shows up when the address is entered by hand. The vendor port is 3702, the ONVIF standard default is 3700. Both are used in the field, the vendor one works with the NVRs that were tested. |
 
-### Step 7.8: Snapshot, optional
+### Step 7.8: Snapshot
 
 | | |
 |---|---|
 | Goal | A still image for the ONVIF snapshot URL. |
 | Change | A CGI script that grabs one JPEG from the pipeline and writes it to stdout. The encoder supports `CVI_RTSP_VIDEO_JPEG`. |
 | Check | The snapshot URL returns a JPEG. |
-| Note | The vendor implementation has no snapshot operation. Many clients show a thumbnail in the device list. Without it the entry is blank. This is new work. |
+| Note | The vendor implementation has no snapshot operation. This is new work. |
 
-### Step 7.9: PTZ, optional
+**Decision: wanted.** Many clients show a thumbnail in the device list. Without it the entry is blank and the camera looks broken.
 
-| | |
-|---|---|
-| Goal | The gimbal is controllable from an ONVIF client. |
-| Change | The four ONVIF PTZ operations, plus the scripts for the position and the movement commands. They call the CAN interface of the gimbal. |
-| Check | A client can move the gimbal. |
-| Note | The vendor implementation has no PTZ. Only if the gimbal is in scope. A camera without a gimbal leaves it out, PTZ is optional in ONVIF. |
+PTZ is **out of scope**. The gimbal is a separate product variant with its own base board, and the vendor implementation of ONVIF has no PTZ support anyway. The four PTZ operations and the CAN plumbing are not part of this image.
 
 ## Step 8: Flash and verify
 
@@ -609,8 +695,6 @@ The toolchain cache does not depend on the target, so the minimal build reuses i
 
 - HaLow, normal WiFi, or both? The `morse.ko` and `dot11ah.ko` modules are for
 the 802.11ah radio, `brcmfmac.ko` for the BCM43012.
-- Is the OTA update wanted? It needs the `upgrade.sh` in the overlay.
-- Is the gimbal wanted? The CAN bus and the `gimbal` binary.
 - Is the battery wanted? The `ads1015` on I2C1 feeds the battery supervisor API.
 - Which sensor to target: OV5647, GC2053 or SC530AI? The defconfig enables all
 three.

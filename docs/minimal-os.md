@@ -57,9 +57,36 @@ None of these are patches on top of upstream Linux. They are the vendor tree, an
 
 The reCamera board carries a Morse mm610x HaLow chip and a BCM43012 for 2.4/5 GHz WiFi. The `bt-init` package patches the BCM firmware at boot. Bluetooth is not needed for the camera, so the package goes, unless the WiFi chip turns out to need it. Bluetooth is only on the `w` variant of the core board. The C1-2002w carries the WiFi/Bluetooth module, the C1-2002 does not.
 
+HaLow is 802.11ah, the WiFi successor to 802.11ac, designed for long range and low power. It runs in the sub-GHz band, so the range is in kilometres rather than metres. That is the point of it: a camera that reports over a long link without asking for much power.
+
+The image carries drivers for both radios, and they are not two settings for the same radio. Which one stays depends on the board the target camera has:
+
+| Radio | Standard | Kernel modules | Supervisor |
+|---|---|---|---|
+| Morse mm610x | 802.11ah, HaLow, sub-GHz | `dot11ah.ko`, `morse.ko` | `wpa_supplicant_s1g` |
+| Broadcom BCM43012 | 802.11ac, 2.4 and 5 GHz | `brcmfmac.ko` | `wpa_supplicant` |
+
+The core board comes in two variants, `C1-2002` with no wireless module at all and `C1-2002w` with the WiFi/Bluetooth module onboard. The default for the minimal image is the BCM only, because a normal WiFi is what a laptop or a phone can join, and HaLow needs a special concentrator on the other side. The detail is in [requirements.md](./requirements.md), requirement 9.
+
 ### The auto update
 
 `auto_download.sh` polls the GitHub release feed of `reCamera-OS` every 60 seconds and installs whatever it finds. `S99user` starts it through `/mnt/system/auto.sh`, the same script that starts the vendor application. Both go. A camera that installs new firmware from the internet on its own is not a normal Linux system, and it is also the path that pulls the prebuilt `reCamera.zip` content into the image.
+
+**Decision: the OTA path stays, the automatic polling goes.** The `upgrade.sh` script itself is kept, it has an A/B partition layout with a rollback and the build already produces the `ota.zip` package. The update is triggered by a person over SSH, not by a loop in the background. The reason in one line: an update mechanism is worth having, a camera that rewrites its own root filesystem from the internet without telling anyone is not.
+
+The detail that matters: the download URL in `upgrade.sh` points at the vendor release feed. For the minimal image it has to point at the fork, otherwise the camera installs the vendor image over the minimal one.
+
+### The scope, decided
+
+| Question | Decision |
+|---|---|
+| OTA update | yes, with the automatic polling removed |
+| Gimbal and PTZ | no |
+| Sensor | OV5647 |
+| Snapshot | yes |
+| Wireless | open, depends on the board, the default is the BCM only |
+
+The reasoning behind each one is in [requirements.md](./requirements.md), requirement 9.
 
 ## How the image is put together
 

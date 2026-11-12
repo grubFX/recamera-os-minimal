@@ -122,3 +122,113 @@ The image is reachable from the network. Dropbear, busybox and openssl have to b
 ## 8. Everything is committed and pushed
 
 Work happens on the `develop` branch of `grubFX/recamera-os-minimal`, in small commits that can be read on their own. **Status: in progress.**
+
+## 9. Scope decisions
+
+The scope of the minimal image is decided. These are the answers, with the reasoning behind each one.
+
+**This section is the authority on the scope.** The plan steps carry the same decisions inline, and where the two differ, this section wins.
+
+| Question | Decision | Reason |
+|---|---|---|
+| OTA update | **yes** | The camera sits in a place where it is expensive to reach. A field update without a cable is worth the complexity. The mechanism is already there and it is a good one. |
+| Gimbal and PTZ | **no** | A fixed camera is the target. The gimbal is a separate product variant with its own base board, so the hardware is not always there. PTZ in ONVIF is optional. |
+| Wireless | **to be decided** | See below. |
+| Sensor | **OV5647** | That is what the standard product ships with. |
+| Snapshot | **yes** | Many clients show a thumbnail in the device list. Without it the entry is blank and the camera looks broken. |
+
+### OTA: yes, with one change
+
+The mechanism is worth keeping. It has an A/B partition layout with a rollback:
+
+```
+external/ramdisk/rootfs/overlay/cv181x_musl_riscv64/system/upgrade.sh
+  latest    resolve the newest release and write the md5 file
+  download  fetch the ota package
+  start     write fip.bin, boot.emmc and rootfs_ext4.emmc, switch the partition
+  rollback  switch back to the other rootfs
+  recovery  set the factory reset flag
+  clean     remove the downloaded files
+```
+
+The partitions are already in the layout, `rootfs` on `mmcblk0p3` and `rootfs_b` on `mmcblk0p4`, and the U-Boot environment carries `use_part_b`, `boot_cnt`, `boot_failed_limits` and `boot_rollback`. The build already produces the `ota.zip` package.
+
+**What goes is `auto_download.sh`.** It runs in a loop, polls the GitHub release feed every 60 seconds, and installs whatever it finds. That is not an update mechanism, that is the camera updating itself from the internet with no way for the owner to know what it installs. The `upgrade.sh` script itself stays, it is the mechanism, and it is triggered by a person.
+
+The decision is: the OTA path is kept and reachable, the automatic polling is removed. The trigger has to be something deliberate. Two candidates:
+
+- A script the user runs over SSH.
+- An HTTP endpoint, which needs an authenticated interface and brings in a web server that is not otherwise in the image.
+
+The SSH route is the simpler one and it fits the minimal image. The plan step 5.2 decides this.
+
+### Gimbal and PTZ: no
+
+The gimbal is a separate product variant, not a feature of the camera:
+
+```
+OSHW-reCamera-Series/hardware/recamera-2002/products/gimbal/README.md
+  Camera stack  C1-2002w + S101 OV5647
+  Gimbal base   B401 CAN
+  Motor interface  CAN, up to 1Mbps
+  Motion        360 degree yaw, 180 degree pitch
+```
+
+The base board is the CAN base, and the motor protocol is a third-party supplier document. The vendor implementation of ONVIF has no PTZ support either, so PTZ would be four new ONVIF operations plus the CAN plumbing.
+
+The consequence for the plan: the `gimbal` binary, the CAN base board support and the four PTZ operations are all out of scope. Plan step 7.9 is dropped.
+
+### Sensor: OV5647
+
+The standard product ships with the S101 OV5647 sensor board. The `SENSOR_COMPATIBILITY.md` in the hardware repository lists the drivers the SG2002 kernel configuration supports, and the defconfig currently enables three:
+
+```
+CONFIG_SENSOR_OV_OV5647=y
+CONFIG_SENSOR_GCORE_GC2053=y
+CONFIG_SENSOR_SMS_SC530AI_2L=y
+```
+
+Only the OV5647 stays as the target. The other two are for the GC2053 variant of the HQ PoE product and for the SC530AI.
+
+The ISP tuning binaries follow the sensor, they are copied to `/mnt/system/cfg/param` by `pack_cfg`. The plan keeps exactly the ones for the target sensor.
+
+### Wireless: open, and it is a real question
+
+This is not a preference between two radios, it depends on which board the camera has.
+
+The core board comes in two variants:
+
+```
+OSHW-reCamera-Series/hardware/recamera-2002/core/c1-2002/README.md
+  C1-2002    No wireless module; exposes additional SDIO/UART signals to the base
+  C1-2002w   Wi-Fi/Bluetooth module, onboard antenna, and I-PEX connector
+```
+
+The `w` suffix identifies the wireless version. The standard Basic product is the `2002w`, the HQ PoE product is built on the plain `C1-2002`.
+
+The image carries drivers for three radios:
+
+| Radio | Driver | Kernel module |
+|---|---|---|
+| Morse mm610x | 802.11ah, the vendor tree in `external/linux/drivers/fgh100m/` | `dot11ah.ko`, `morse.ko` |
+| Broadcom BCM43012 | 802.11ac, upstream `brcmfmac` | `brcmfmac.ko` |
+
+What HaLow is: 802.11ah, the WiFi successor to 802.11ac that was designed for long range and low power. It runs in the sub-GHz band, so the range is in kilometres rather than metres. That is the point of it: a camera that reports over a long link without asking for much power.
+
+The two are not alternatives in the same sense. They are two different radios for two different jobs, and the board decides which one exists. The plan needs to know which variant the target camera is.
+
+There is a detail in the boot script that matters for this:
+
+```
+external/ramdisk/rootfs/overlay/cv181x_musl_riscv64/system/ko/loadsystemko.sh
+  [ ! -e /dev/morse_io ] && [ ! -e /dev/mmcblk1 ] && {
+      # gimbal
+      [ -x /usr/bin/gimbal ] && { ... }
+      # PoE
+      ...
+  }
+```
+
+The HaLow radio and the SD card share GPIOs, so the script skips the gimbal and the PoE pinmux when the HaLow radio is present. Dropping one radio can therefore change what the other one can do, and that has to be checked before removing anything.
+
+Plan step 3.3 keeps the wireless stack. What it keeps depends on the answer.
