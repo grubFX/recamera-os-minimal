@@ -67,6 +67,20 @@ WiFi. The `bt-init` package patches the BCM firmware at boot. Bluetooth is not
 needed for the camera, so the package goes, unless the WiFi chip turns out to
 need it.
 
+Bluetooth is only on the `w` variant of the core board. The C1-2002w carries
+the WiFi/Bluetooth module, the C1-2002 does not.
+
+### The auto update
+
+`auto_download.sh` polls the GitHub release feed of `reCamera-OS` every 60
+seconds and installs whatever it finds. `S99user` starts it through
+`/mnt/system/auto.sh`, the same script that starts the vendor application.
+
+Both go. A camera that installs new firmware from the internet on its own is
+not a normal Linux system, and it is also the path that pulls the prebuilt
+`reCamera.zip` content into the image.
+
+
 ## How the image is put together
 
 The build is driven by `external/configs/sg2002_recamera_emmc_defconfig`. It picks

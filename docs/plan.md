@@ -144,16 +144,19 @@ the BCM firmware at boot, which is the part that goes.
 | | |
 |---|---|
 | Goal | SSH, but only one implementation. |
-| Change | The defconfig already selects dropbear. Drop `openssh` if it is in the image, or the other way round. Dropbear is the smaller one. |
+| Change | The upstream build has both: the defconfig selects dropbear, and `external/buildroot/configs/cvitek_CV181X_musl_riscv64_defconfig` sets `BR2_PACKAGE_OPENSSH=y` with client, server and key utils. Drop one. Dropbear is the smaller one. |
 | Check | The image has exactly one sshd. It starts at boot and accepts the key. |
+| Note | The init script lives in `/etc/init.d/S50sshd`, which comes from the buildroot overlay, not from the board rootfs. |
 
 ### Step 3.5: Keep NTP
 
 | | |
 |---|---|
 | Goal | The clock is right after a power cycle. |
-| Change | Keep `ntp` and `ntpd`. |
+| Change | Keep `ntp` and `ntpd`. The config is in the overlay at `etc/ntp.conf`. |
 | Check | NTP is in the inventory and the init script starts it. |
+| Note | `openssl` is a dependency of `wpa_supplicant_s1g`, so it stays even if nothing else needs TLS. |
+
 
 ### Step 3.6: Drop FreeRTOS
 
@@ -163,7 +166,8 @@ the BCM firmware at boot, which is the part that goes.
 | Change | In the defconfig: `CONFIG_ENABLE_FREERTOS=n`, `CONFIG_ENABLE_RTOS_DUMP_PRINT=n`. Remove `cv181x_rtos_cmdqu.ko` from the module list. |
 | Check | The inventory has no FreeRTOS. The build log has no RTOS target. |
 | Note | The FreeRTOS forks are two years behind upstream. Dropping them also removes the oldest code in the image. |
-| Question | Does anything on the Linux side talk to the RTOS core? If yes, this step needs more work. |
+| Blocker | `rtos_cmdqu` is used by `rgn` (region) and `fast_image`, both part of the video pipeline. Before dropping it, check whether the RTOS core carries work the Linux side depends on. If it does, this step needs a different approach. |
+
 
 ### Step 3.7: Build live555 from source
 
@@ -196,22 +200,53 @@ the BCM firmware at boot, which is the part that goes.
 
 The overlay sets up the writable root. Some of its parts belong to the app layer.
 
+Two places hold the init scripts:
+
+- `external/buildroot/board/cvitek/CV181X/overlay/etc/init.d/` has `S70hardware`,
+  `S80dnsmasq`, `S92node-red`, `S98ttyd` and `S99user`
+- `external/ramdisk/rootfs/overlay/cv181x_musl_riscv64/system/` has the boot
+  scripts: `auto.sh`, `auto_download.sh`, `rootfs_overlay.sh`, `upgrade.sh` and
+  the usb networking scripts
+
+The `S99user` script sources `/mnt/system/auto.sh`, which starts the vendor
+application. That is the hook to the app layer.
+
 ### Step 4.1: Keep the overlay, drop the app hooks
 
 | | |
 |---|---|
 | Goal | The writable root still works, without the OTA and factory reset of the app image. |
-| Change | `external/ramdisk/rootfs/overlay/cv181x_musl_riscv64/system/`: keep `rootfs_overlay.sh` and `ko/loadsystemko.sh`. Remove `upgrade.sh` and the OTA block in `rootfs_overlay.sh` if OTA is not wanted. |
+| Change | Keep `rootfs_overlay.sh` and `ko/loadsystemko.sh`. Remove `upgrade.sh` and the OTA block in `rootfs_overlay.sh` if OTA is not wanted. |
 | Check | The boot log shows the overlay mounted and the kernel modules loaded. |
 | Note | The factory reset is a safety feature. Keeping it is cheap and saves a bricked camera. |
 
-### Step 4.2: Clean up the module list
+### Step 4.2: Remove the auto update
+
+| | |
+|---|---|
+| Goal | The camera does not pull new firmware from the internet behind your back. |
+| Change | Remove `auto_download.sh` and the call to it. It polls the GitHub release feed every 60 seconds and installs whatever it finds. |
+| Check | The script is not in the image. Nothing reaches out to github.com at boot. |
+| Note | `S99user` sources `/mnt/system/auto.sh`, and `auto.sh` is what starts the vendor application. Both the auto update and the app start have to go for the image to be self contained. |
+
+
+### Step 4.3: Clean up the init scripts
+
+| | |
+|---|---|
+| Goal | Only the services the minimal image needs start at boot. |
+| Change | Remove `S80dnsmasq`, `S92node-red`, `S98ttyd` from the buildroot overlay. `S50nginx` and `S91mdev` are already in `init.d/disabled/`. |
+| Check | The boot log shows the expected services and nothing else. |
+
+### Step 4.4: Clean up the module list
 
 | | |
 |---|---|
 | Goal | Only the modules the camera needs are loaded. |
-| Change | In `loadsystemko.sh`: remove the TPU modules (`cv181x_tpu.ko`), the audio modules and the gimbal init if not wanted. Remove the `morse.ko` and `dot11ah.ko` lines if HaLow goes. |
+| Change | In `loadsystemko.sh`: remove the TPU module (`cv181x_tpu.ko`), the audio modules and the gimbal init if not wanted. Remove the `morse.ko` and `dot11ah.ko` lines if HaLow goes. |
 | Check | The boot log lists the expected modules and no errors. |
+| Note | The module list also shows the hardware: `ti-ads1015.ko` for the battery on I2C1, `morse.ko` for the HaLow chip, `brcmfmac.ko` for the BCM43012 WiFi. |
+
 
 ## Step 5: The camera comes up
 
