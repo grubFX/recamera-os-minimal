@@ -106,6 +106,15 @@ The kernel meets the hard requirement. It is upstream Linux 5.10.4, traceable
 through the git history, with the vendor additions clearly separated in one
 commit.
 
+It is also not abandoned. Upstream Linux 5.10 is a longterm release and still
+gets fixes, the Sophgo fork mirrors that with the weekly stable releases. The
+last upstream commit was `3a323bc2` "Linux 5.10.274" on 2026-11-06, the last
+fork commit `2d84ae4338` on 2026-10-28.
+
+**The kernel is behind, not unmaintained.** What a newer kernel would cost is
+in [kernel-upgrade.md](./kernel-upgrade.md).
+
+
 ### Why not a newer kernel
 
 This is the real reason the kernel is 5.10 and not 6.x or 7.x, and it is not
@@ -177,7 +186,9 @@ to merge into. Nobody else does this for this chip.
 
 **Recommendation:** keep the 5.10 kernel. Track the weekly stable releases, they
 are the security updates. Do not spend the effort on a 6.x port, the driver
-work is the expensive part and there is no upstream to merge into.
+work is the expensive part and there is no upstream to merge into. The details
+are in [kernel-upgrade.md](./kernel-upgrade.md).
+
 
 ## The other forks
 

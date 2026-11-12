@@ -42,6 +42,13 @@ The kernel is not old because nobody cares. The camera drivers in `osdrv` use
 version guards in the sources stop at 5.10. A newer kernel exists for the SoC,
 but not for the camera.
 
+Upstream Linux 5.10 is still a maintained longterm release, the fork gets the
+weekly stable releases. The kernel is behind, not abandoned.
+
+What a port to 6.4 or 7.x would cost is in
+[kernel-upgrade.md](./kernel-upgrade.md).
+
+
 
 ### Parts that go
 
