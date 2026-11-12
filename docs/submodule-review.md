@@ -164,7 +164,7 @@ going through all of `osdrv/interdrv` and fixing the API breaks.
 | `sophgo/linux_5.10` | 5.10.4 | in `osdrv`, out of tree | used today |
 | `sophgo/linux` `v6.8-rc1` | 6.8-rc1, Jan 2024 | none | frozen since 2024 |
 | `sophgo/linux-riscv` master | 6.18, active | none | SoC only |
-| `torvalds/linux` | current | none | SoC only |
+| `torvalds/linux` | 7.4-rc2, active | none | SoC only |
 
 `sophgo/linux-riscv` at 6.18 has `sg2002.dtsi`, but only with the clock, plic,
 clint, sdhci and pinctrl. There is no `drivers/media/platform/sophgo`, no
@@ -173,6 +173,15 @@ SG2002 support is SoC level only.
 
 So a newer kernel does not exist for this camera. The 6.8 branch in `sophgo/linux`
 is frozen at January 2024 and has no CVI drivers either.
+
+The SoC part is in good shape though. Mainline has the modernized clock
+driver `drivers/clk/sophgo/clk-cv1800.c`, the pinctrl, the sound codec
+drivers, the SDHCI host and the mailbox binding. The DesignWare DMA
+controller of the CV181X is also upstream, as `drivers/dma/dw/`.
+
+What is missing is only the video pipeline, and that lives in `osdrv`. The
+details are in [kernel-upgrade.md](./kernel-upgrade.md).
+
 
 ### The honest position
 

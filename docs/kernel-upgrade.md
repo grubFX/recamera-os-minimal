@@ -127,24 +127,54 @@ $ grep -c clk_hw_register_clkdev v7.3:include/linux/clk.h
 0
 ```
 
-### 4. The CV181X DMA controller has no upstream driver
+### 4. The CV181X DMA controller
 
 ```
 linux_5.10/drivers/dma/cvitek/   1 file, 2.200 lines
 ```
 
-The 6.18 Sophgo kernel has no CV181X DMA driver at all. Not a different
-version, nothing:
+This one needs a closer look, because it is not as bad as it looks.
+
+The driver is not a CVI invention. It is the Synopsys DesignWare AHB DMA
+controller, `dw_dmac`:
+
+```c
+#define DRV_NAME "dw_dmac"
+```
+
+and it uses the standard Synopsys register layout:
+
+```c
+#define DW_DMAC_CH_PAUSE_OFFSET      16
+#define DW_DMAC_CH_EN_WE_OFFSET       8
+#define DW_DMAC_CH_ABORT_OFFSET      32
+#define DW_DMA_MAX_NR_MASTERS         2
+#define DW_DMA_MAX_NR_CHANNELS        8
+```
+
+Mainline has this controller:
 
 ```
-$ gh api /repos/sophgo/linux-riscv/contents/drivers/dma/cvitek
-404 Not Found
+drivers/dma/dw/core.c
+drivers/dma/dw/of.c
+drivers/dma/dw/platform.c
 ```
 
-`osdrv` uses this DMA controller for the video pipeline. Without the driver
-there is no camera.
+with `config DW_DMAC` "Synopsys DesignWare AHB DMA controller" and a
+`snps,dw-axi-dmac.yaml` binding for the AXI variant.
+
+So the DMA controller is likely usable from Mainline. What the CVI driver adds
+on top is the channel count, the CV181X quirks and a workaround for a BM1880
+JIRA bug:
+
+```c
+/* #define CONFIG_SYSDMA_JIRA_BUG_BM1880_17 */
+```
+
+That is a port of a few hundred lines, not a driver written from scratch.
 
 ### 5. The scheduler patch touches kernel internals
+
 
 `linux_5.10/kernel/sched/cvi_sched.h` is included by `kernel/sched/core.c` and
 rewrites the scheduling policy:
@@ -226,7 +256,7 @@ Rough order of magnitude, for someone who does this kind of work:
 | `class_create` migration | 5 call sites | Mechanical, an hour |
 | `set_fs` removal | 1 call site | Mechanical |
 | Clock driver to 6.5+ | 9.276 lines | The `clkdev` path has to be replaced with the `devm_` path. The modernized Sophgo version shows how, and Mainline has it already. |
-| DMA driver | 2.200 lines | Has to be ported or written against the new DMA API |
+| DMA driver | 2.200 lines | It is the Synopsys DesignWare AHB DMA, Mainline has `drivers/dma/dw/`. The CVI delta is the channel count and the quirks. |
 | Scheduler patch | 100 lines | Rewrite for EEVDF, and check whether the pinning is still needed at all |
 | `osdrv` API fixes | unknown until compiled | The compiler finds these one at a time |
 | Bootloader | moderate | U-Boot and OpenSBI have their own deltas. Mainline U-Boot has the SG2002 device trees, so the board support can move there. |
@@ -246,8 +276,8 @@ Not a rewrite from 5.10, but a move onto what already exists:
 2. Move the board device tree. The reCamera board DTS lives in
    `external/build/boards/cv181x/sg2002_recamera_emmc/dts_riscv/` and only
    needs to be rewritten on top of the Mainline `sg2002.dtsi`.
-3. Port the DMA driver. It is the smallest piece that has no successor
-   anywhere, 2.200 lines.
+3. Port the DMA driver. Mainline `drivers/dma/dw/` is the same controller,
+   the CV181X delta is the channel count and the quirks.
 4. Use the modernized clock driver instead of the 5.10 one.
 5. Fix `osdrv` against the compiler. It is a known finite set of API breaks.
 6. Decide about the scheduler patch, and whether the priority pinning is
