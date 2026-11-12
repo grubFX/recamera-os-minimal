@@ -28,7 +28,7 @@ these places.
 
 | Part | Source | Why it stays |
 |---|---|---|
-| Kernel | `linux_5.10` (Sophgo fork) | Genuine upstream Linux 5.10.4 with one vendor porting commit on top. The camera drivers are not in the kernel at all, they live out of tree in `osdrv` and are written against the 5.10 API. See [submodule-review.md](./submodule-review.md). |
+| Kernel | `linux_5.10` (Sophgo fork) | Genuine upstream Linux 5.10.4 with three vendor commits on top. The camera drivers are not in the kernel at all, they live out of tree in `osdrv` and are written against the 5.10 API. See [submodule-review.md](./submodule-review.md). |
 | Bootloader | `u-boot-2021.10`, `fsbl`, `opensbi` | Boot chain of the SoC. All three are upstream with a small vendor delta. |
 | SDK | `osdrv`, `cvibuilder`, `cvikernel`, `cvimath`, `ive`, `cvi_mpi` | The video pipeline, the ISP and the encoder. All source, no blobs. |
 | RTSP | `cvi_rtsp` | The RTSP server. Source. |
@@ -120,7 +120,7 @@ b4ca5efcaf  2024-02-14  sophgo-forum-service linux porting cvitek asic chips.
 ```
 
 Everything below the first entry is upstream Linux by the upstream authors.
-Above it there are two Sophgo commits and then weekly stable releases.
+Above it there are three Sophgo commits and then weekly stable releases.
 
 The porting commit adds the CV181X device trees and the clock, DMA, pinctrl and
 sound drivers. The changes to `arch/riscv/` are backports from upstream v5.12 and

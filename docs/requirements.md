@@ -9,7 +9,7 @@ No proprietary code, no closed blobs, nothing that only pretends to be Linux.
 
 **Status: met.** The kernel is `sophgo/linux_5.10`, whose history starts at
 `b1313fe517` "Linux 5.10.4" by Greg Kroah-Hartman and continues with upstream
-authors. Above that there are exactly two Sophgo commits, then weekly stable
+authors. Above that there are exactly three Sophgo commits, then weekly stable
 releases.
 
 The vendor additions are in one commit (`b4ca5efcaf` "linux porting cvitek asic
@@ -44,10 +44,24 @@ must be documented.
 
 | Fork | Own commits | Behind upstream |
 |---|---|---|
-| `linux_5.10` | 1 porting commit + stable releases | 0 |
+| `linux_5.10` | 31 ahead of upstream 5.10.4 | 0 |
 | `buildroot-2021.05` | 6 | 0 |
 | `u-boot-2021.10` | 3 | 0 |
 | `opensbi` | 10 | 381 |
+
+The 31 commits of the kernel break down into three vendor commits and the
+weekly stable releases:
+
+```
+b4ca5efcaf  2024-02-14  linux porting cvitek asic chips.
+72ef337123  2024-02-14  [fea] Init sg200x-dev branch.
+25faa0d62f  2024-03-29  [fix] fix linux build error..
+```
+
+plus 28 `weekly rls` commits. The stable releases carry upstream fixes, not
+vendor code.
+
+
 
 ## 4. Normal Linux, no weird patches
 

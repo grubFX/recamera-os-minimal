@@ -138,6 +138,8 @@ mosquitto broker with it.
 | Goal | A smaller image and fewer listening ports. |
 | Change | Turn off `mosquitto`, `avahi`, `dnsmasq`, `ttyd` (`node-red-dashboard` websocket), `bluez5_utils`, `bt-init`. |
 | Check | The inventory shows no mosquitto, no avahi, no ttyd. The build log has no error about a missing dependency. |
+| Note | Two packages in the Buildroot fork carry patches for packages a camera does not need: `freetype` and `zlog`. They go with the packages. `package/busybox/busybox.config` stays, it defines what the shell in the image can do. |
+
 
 ### Step 3.3: Keep the wireless stack that the camera needs
 

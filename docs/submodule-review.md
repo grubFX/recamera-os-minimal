@@ -51,7 +51,15 @@ b4ca5efcaf  2024-02-14  sophgo-forum-service linux porting cvitek asic chips.
 
 Everything below `b1313fe517` is genuine upstream Linux, authored by the usual
 upstream names (Linus Torvalds, Greg Kroah-Hartman, and the rest). Above it
-there are exactly **two** Sophgo commits, then weekly stable releases:
+there are exactly **three** Sophgo commits:
+
+```
+b4ca5efcaf  2024-02-14  linux porting cvitek asic chips.
+72ef337123  2024-02-14  [fea] Init sg200x-dev branch.
+25faa0d62f  2024-03-29  [fix] fix linux build error..
+```
+
+and then 28 weekly stable releases:
 
 ```
 2d84ae4338  2026-10-28  linux_5.10: weekly rls 2026.10.28
@@ -62,8 +70,9 @@ f6eb6441ec  2025-12-17  linux_5.10: weekly rls 2025.12.17
 ...
 ```
 
-So the kernel is real upstream Linux, plus one porting commit, plus stable
+So the kernel is real upstream Linux, plus three vendor commits, plus stable
 updates on top. No hidden history, no rewritten commits.
+
 
 ### What the porting commit contains
 
@@ -180,7 +189,36 @@ ahead=6 behind=0
 ```
 
 Six commits on top of upstream buildroot 2021.05, nothing missing. The changes
-are the board config and the init scripts.
+are the board config and the init scripts:
+
+```
+8d456c1c  2024-01-30  [buildroot] Supports generating CV181X CV182X ext4 file system.
+c15bdd8f  2024-01-30  [buildroot] Fix some runtime errors
+ab7661e7  2024-01-30  buildroot: weekly update 2023-04-26
+50b37637  2024-01-30  buildroot: weekly-rls-2023-12-22
+5b7acd1b  2019-10-09  (master): Support Xuantie toolchains, and modify the defconfigs.
+4e338c31  2025-12-25  (buildroot): add link options for musl toochain
+```
+
+Three of them are stable updates for a newer release line, one is the
+toolchain support that predates the 2021.05 tag.
+
+Two of them touch external packages and are worth a look:
+
+- `package/freetype/0001-fix-TOP_DIR-value-error-for-CVITEK-platform.patch`
+- `package/zlog/0001-mod-if-DEBUG-equal-0-then-enable-debug-info-output.patch`
+
+Neither package is needed in a camera image. `freetype` is a font library, only
+useful with a text renderer. `zlog` is a logging library from the Sophgo SDK.
+Both patches can go with the packages.
+
+`package/busybox/busybox.config` is the busybox configuration. It is worth
+reading, it is the config that defines what the shell and the applets in the
+image can do.
+
+The init scripts in `board/cvitek/CV181X/overlay/etc/init.d/` are the ones
+that start the services. `S99user` is the interesting one, it sources
+`/mnt/system/auto.sh` which starts the vendor application.
 
 **Buildroot 2021.05 is end of life.** The upstream branch got its last commit
 in June 2021 and no security fixes since. That matters, because the image
@@ -217,6 +255,7 @@ would need the CV181X board support ported over, which is more work than
 patching one package.
 
 
+
 ### u-boot
 
 The fork has three own commits on top of upstream v2021.10, then the same
@@ -241,6 +280,18 @@ ahead=10 behind=381
 Ten commits ahead of upstream v1.2. The 381 behind are upstream commits after
 v1.2. OpenSBI is a small, well reviewed project and the delta is small enough
 to audit by hand.
+
+The own commits are the same pattern as the kernel:
+
+```
+ba54b003  2024-02-14  note: sync patch from T-Head.
+216793f1  2024-02-14  (opensbi): Init branch sg200x-dev
+```
+
+plus the weekly stable releases. The T-Head patch is a sync of an upstream
+vendor patch for the same generation of RISC-V cores, it does not touch the
+CV181X support.
+
 
 ### FreeRTOS
 
@@ -298,8 +349,10 @@ LIVE555_LIB ?= $(LIVE555_DIR)/lib/libliveMedia.a $(LIVE555_DIR)/lib/libBasicUsag
                $(LIVE555_DIR)/lib/libUsageEnvironment.a $(LIVE555_DIR)/lib/libgroupsock.a
 ```
 
-The tarball also carries `bin/live555MediaServer`, the generic RTSP server that
-`cvi_rtsp` builds on.
+The tarball also carries `bin/live555MediaServer`. That binary is not used by
+`cvi_rtsp`. The server class in `cvi_rtsp` is `CVI_RTSP`, it inherits from the
+Live555 `RTSPServer` class and links the four libraries above. The generic
+`live555MediaServer` is a separate program that comes with the same tarball.
 
 Live555 itself is not shady. It is a well known project (LGPL-3.0, maintained
 by `rgaufman/live555`, last push July 2026). And Buildroot has a package for
@@ -337,6 +390,7 @@ Two details to get right in the build:
   `include/liveMedia` and `include/UsageEnvironment` as separate include
   directories. The Buildroot layout has them in one `include` directory, so
   `LIVE555_INC` needs adjusting.
+
 
 
 ### opencv_aisdk.tar.gz: binaries
