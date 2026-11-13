@@ -239,6 +239,11 @@ There is no matrix. The only target that exists is `sg2002_recamera_emmc`, and `
 
 The workflow runs on a push to `develop`, on a tag push and on a manual dispatch. A tag push also creates the GitHub release, with the matching section of `CHANGELOG.md` as the body.
 
+The repository only allows actions that GitHub itself made. That rules out `softprops/action-gh-release`, so the release is made with the `gh` CLI, which is on the runner image.
+
+> The runner is `ubuntu-26.04`. The Actions all run on `node24`, which is the
+> Node.js version of that image.
+
 Locally, the Docker daemon does not run on this machine and systemd is offline, so `docker_build.sh` does not work here. The workflow does.
 
 Output lands in `output/sg2002_recamera_emmc/install/soc_sg2002_recamera_emmc/`.

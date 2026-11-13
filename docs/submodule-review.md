@@ -4,30 +4,33 @@ Every submodule in the repo, checked for: is it a fork of something upstream, is
 
 ## Summary
 
+The build of the target touches eight of the 27 submodules. The table says
+for each one whether it is used, and if it can be replaced by upstream.
+
 | Submodule | Type | Trust | Recommendation |
 |---|---|---|---|
-| `linux_5.10` | fork of upstream Linux 5.10.4 | good, see below | keep |
-| `buildroot-2021.05` | fork of buildroot 2021.05 | good, 6 commits ahead | keep |
-| `u-boot-2021.10` | fork of u-boot v2021.10 | good, 3 commits ahead | keep |
-| `opensbi` | fork of upstream OpenSBI | good, 10 commits ahead | keep |
+| `linux_5.10` | fork of upstream Linux 5.10.4 | good, see below | keep, used |
+| `buildroot-2021.05` | fork of buildroot 2021.05 | good, 6 commits ahead | keep, used |
+| `u-boot-2021.10` | fork of u-boot v2021.10 | good, 3 commits ahead | keep, used |
+| `opensbi` | fork of upstream OpenSBI | good, 10 commits ahead | keep, used |
 | `FreeRTOS-Kernel` | fork of FreeRTOS | outdated (2024) | drop, see below |
 | `Lab-Project-FreeRTOS-POSIX` | fork of FreeRTOS | outdated (2024) | drop |
 | `freertos` | sophgo fork | vendor port | drop with the RTOS |
-| `fsbl` | sophgo, GPL-2.0 | vendor | keep |
-| `osdrv` | sophgo, source | vendor, unavoidable | keep |
+| `fsbl` | sophgo, GPL-2.0 | vendor | keep, used |
+| `osdrv` | sophgo, source | vendor, unavoidable | keep, used |
 | `ramdisk` | sophgo, source | vendor | keep, trim |
-| `build` | sophgo, source | vendor | keep |
-| `cvi_rtsp` | sophgo, source | vendor | keep |
-| `cvi_mpi` | sophgo, source | vendor | keep |
+| `build` | sophgo, source | vendor | keep, used |
+| `cvi_rtsp` | sophgo, source | vendor | keep, used |
+| `cvi_mpi` | sophgo, source | vendor | keep, used |
 | `isp_tuning` | sophgo, binary tuning files | vendor | keep |
 | `SensorSupportList` | sophgo, BSD-2 | vendor | keep |
 | `oss` | sophgo, tarballs | mixed, see below | trim hard |
 | `host-tools` | sophgo, toolchain | vendor | keep |
-| `flatbuffers` | fork of google/flatbuffers | outdated (2024) | drop with the TPU stack |
+| `flatbuffers` | fork of google/flatbuffers | identical to upstream v2.0.8 | drop with the TPU stack |
 | `cnpy` | sophgo, MIT | only for the TPU | drop |
 | `cvibuilder` | sophgo | only for the TPU | drop |
 | `cvikernel` | sophgo | only for the TPU | drop |
-| `cviruntime` | sophgo | only for the TPU | drop |
+| `cviruntime` | sophgo | builds the TPU SDK | drop with the TPU stack |
 | `cvimath` | sophgo | only for the TPU | drop |
 | `tdl_sdk` | sophgo | only for the TPU | drop |
 | `ive` | sophgo | image processing, see below | decide |
@@ -411,3 +414,133 @@ second core runs FreeRTOS. If nothing uses it, it goes.
 the Buildroot package installs to the sysroot. Check that the include and library paths line up.
 - Buildroot 2021.05 is end of life. Dropbear, busybox and openssl in it have
 known CVEs. Worth a look at whether the image needs openssl at all, the minimal image has no TLS use case.
+
+## Who is Sophgo
+
+Sophgo Technologies (算能, sophgo.com) is a Chinese chip company, founded
+2022, based in China. It makes the SG200x and CV181x TPU processors, the
+SoC in the reCamera. The GitHub organisation `github.com/sophgo` was created
+2022-01-17 and holds 106 public repositories. Its Open Source contact is
+opensource@sophgo.com.
+
+Every submodule in this repo comes from that organisation. There is no
+upstream project of the reCamera OS itself. The vendor ships the hardware
+reference SDK, and this repo is the trimmed down version of it.
+
+That has one consequence worth keeping in mind: the vendor decides when a
+release lands. The `weekly rls` commits show the cadence, roughly every
+four to six weeks. There is no way to get a fix faster from upstream,
+because upstream does not exist for the vendor parts.
+
+## What the build actually uses
+
+Not all 27 submodules are needed for a build. The build log
+`output/sg2002_recamera_emmc/build-host.log` shows which directories the
+make targets entered:
+
+```
+build               the board definitions and the rootfs rules
+buildroot-2021.05   the package build
+u-boot-2021.10      the bootloader
+fsbl                the first stage bootloader
+linux_5.10          the kernel
+osdrv               the camera drivers
+cvi_mpi             the MPI API
+cvi_rtsp            the RTSP server
+```
+
+Eight directories. Everything else is either pulled in as a source tree
+for a later step or not used at all for this target.
+
+`cviruntime` is the special case. It is not entered as a build directory
+but it is copied into the output and `build_tpu_sdk()` is run from
+`cviruntime/build_sdk`. That builds the AI accelerator SDK, including
+flatbuffers, opencv and curl, and installs it to
+`output/.../tpu_musl_riscv64/cvitek_tpu_sdk`.
+
+The remaining submodules are not part of the target build:
+
+| Submodule | Role | In the build? |
+|---|---|---|
+| `cviruntime` | builds the TPU SDK | yes, as a source tree |
+| `cvikernel` | the TPU kernel driver | no |
+| `cvimath` | the TPU math library | no |
+| `cvibuilder` | the TPU Docker setup | no |
+| `cnpy` | NumPy file access for the TPU tools | no |
+| `tdl_sdk` | the model deployment SDK | no |
+| `flatbuffers` | serialization for the TPU | no, the SDK has its own |
+| `ive` | the image vector engine | no, but the ISP wants it |
+| `freertos` | the RTOS distribution | no |
+| `FreeRTOS-Kernel` | the RTOS kernel | no |
+| `Lab-Project-FreeRTOS-POSIX` | the POSIX layer | no |
+| `oss` | sample applications | no |
+| `isp_tuning` | the sensor tuning data | no |
+| `SensorSupportList` | the sensor module list | no |
+| `ramdisk` | the boot overlay | no |
+| `host-tools` | the cross toolchain | no, the toolchain is in the image |
+
+## Upstream alternatives
+
+Eight of the submodules are plain forks with a known upstream. The question
+for each one is whether the vendor delta can be carried as a patch.
+
+| Submodule | Upstream | Delta | Can it be replaced? |
+|---|---|---|---|
+| `linux_5.10` | `XUANTIE-RV/linux`, and upstream Linux 5.10 | 250 vendor commits, of which 3 are the actual port | no |
+| `u-boot-2021.10` | `u-boot/u-boot` v2021.10 | 3 vendor commits | no, the board init needs `cvitek.h` |
+| `opensbi` | `riscv-software-src/opensbi` | 1 snapshot commit, patches `platform/template` | no |
+| `buildroot-2021.05` | `buildroot/buildroot` 2021.05 | 6 vendor commits | no, the board config lives here |
+| `flatbuffers` | `google/flatbuffers` | 1 commit, identical to upstream v2.0.8 | yes, it is upstream |
+| `FreeRTOS-Kernel` | `FreeRTOS/FreeRTOS-Kernel` | 1 commit, 9 files changed in the RISC-V and CA53 ports | no |
+| `Lab-Project-FreeRTOS-POSIX` | `FreeRTOS/Lab-Project-FreeRTOS-POSIX` | 1 commit | no |
+| `freertos` | `FreeRTOS/FreeRTOS` | snapshot commits | no |
+
+The answer is no for everything that is used. The reason is the same in
+every case: the vendor delta is not a patch that can be re-applied, it is
+the hardware support. The kernel carries the CVITEK drivers for SDHCI, NAND,
+I2S, DMA and ION. The FreeRTOS fork patches the RISC-V and the CA53 port
+layers, the context switch and the interrupt handling. The u-boot fork
+adds `board/cvitek/cvi_board_init.c` and `include/cvitek/cvitek.h`.
+
+The one that could go is `flatbuffers`, and only because the TPU stack goes
+with it. It is already upstream, there is nothing to carry over.
+
+The other direction is the opposite of replacing: going to a newer upstream.
+The kernel is on 5.10 and cannot move. The camera drivers in `osdrv` use
+the two argument `class_create()`, which was removed in kernel 6.4, and
+their version guards stop at 5.10. See `kernel-upgrade.md`.
+
+## The devcontainer distribution
+
+The devcontainer runs Debian 13 (trixie, glibc 2.41). The CI runner runs
+Ubuntu 26.04 (resolute, glibc 2.43).
+
+Ubuntu 26.04 works for the devcontainer as well. The requirements are
+checked:
+
+- `buildpack-deps:26.04-curl` exists as a Docker image.
+- glibc 2.43 satisfies everything. The oldest symbol the prebuilt host
+  tools need is `GLIBC_2.14` in `make_ext4fs`, and `mkimage` needs
+  `GLIBC_2.25`. Both are well below 2.41.
+- All packages of the Dockerfile exist on 26.04. `ninja-build`,
+  `android-sdk-libsparse-utils`, `scons`, `parallel`, `tree`,
+  `python3-pip` and `nodejs` are in universe, the rest is in main.
+
+Two packages need a different name on Ubuntu:
+
+| Debian | Ubuntu |
+|---|---|
+| `tclsh` | `tcl` |
+| `ssh-client` | `openssh-client` |
+
+And two versions are lower than they should be. Ubuntu 26.04 ships
+Node.js 22.22.1, the Dockerfile asks for Node 24. The NodeSource
+repository does not publish a resolute repository yet, so Node 24 would
+have to come from the NodeSource setup script, which does not know
+resolute either. Python is 3.14.3 on Ubuntu against 3.13 on Debian.
+
+> The base image is a choice, not a constraint. Debian 13 works today and
+> the build does not care. Ubuntu 26.04 would be one distribution for the
+> container and the runner, which is worth something for the shared host
+> tool list.
+

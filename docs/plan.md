@@ -117,6 +117,16 @@ external/buildroot/package/nodejs/nodejs.mk
 NPM = $(NODEJS_BIN_ENV) $(HOST_DIR)/bin/npm
 ```
 
+Ubuntu 26.04 (resolute) would work as a base image too. It has glibc 2.43,
+`buildpack-deps:26.04-curl` exists, and every package of the Dockerfile is
+available. Two names differ, `tclsh` becomes `tcl` and `ssh-client` becomes
+`openssh-client`. The catch is Node.js: Ubuntu 26.04 ships 22, and neither
+NodeSource nor the distro has a repository for 24. The details are in
+[submodule-review.md](./submodule-review.md).
+
+> One distribution for the container and the runner makes the shared host
+> tool list shorter. It is not urgent, the Debian image works today.
+
 ### Step 0.2: Baseline inventory
 
 Unpack the rootfs of the built image and list what is in it.
