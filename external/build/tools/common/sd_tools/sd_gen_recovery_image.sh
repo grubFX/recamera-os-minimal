@@ -53,7 +53,7 @@ function create_disk_mbr() {
     fi
 
     image=$1
-    dd if=/dev/zero of=./${image} bs=512 count=${img_size}
+    dd if=/dev/zero of=./${image} bs=512 count=${img_size} || exit 1
 
     # Create the disk image
     (
@@ -61,7 +61,10 @@ function create_disk_mbr() {
         echo "label-id: 0x48617373"
         echo "unit: sectors"
         echo "boot: start=${part_start}, size=${part_size}, type=c,bootable" # create the boot partition
-    ) | sfdisk ${image}
+    ) | sfdisk ${image} || {
+        echo "Error: sfdisk failed, the image has no partition table"
+        exit 1
+    }
     #> sfdisk --force -uS ${image}
 
     echo "${FUNCNAME[0]} ok"
@@ -75,14 +78,17 @@ function write_boot_part() {
     fi
 
     local part=$(mktemp)
-    dd if=/dev/zero of=${part} bs=512 count=${part_size}
-    mkfs.vfat -n ${part_label} ${part}
+    dd if=/dev/zero of=${part} bs=512 count=${part_size} || exit 1
+    mkfs.vfat -n ${part_label} ${part} || {
+        echo "Error: mkfs.vfat failed"
+        exit 1
+    }
 
-    mcopy -i ${part} fip.bin ::
-    mcopy -i ${part} boot.emmc ::
-    mcopy -i ${part} rootfs_ext4.emmc ::
+    mcopy -i ${part} fip.bin :: || exit 1
+    mcopy -i ${part} boot.emmc :: || exit 1
+    mcopy -i ${part} rootfs_ext4.emmc :: || exit 1
 
-    dd if=${part} of=${1} seek=${part_start} bs=512 conv=notrunc,sparse
+    dd if=${part} of=${1} seek=${part_start} bs=512 conv=notrunc,sparse || exit 1
 
     rm -rf ${part}
     echo "${FUNCNAME[0]} ok"

@@ -58,7 +58,7 @@ function create_disk_mbr() {
     fi
 
     image=$1
-    dd if=/dev/zero of=${image} bs=512 count=${img_size}
+    dd if=/dev/zero of=${image} bs=512 count=${img_size} || exit 1
 
     # Create the disk image
     (
@@ -67,7 +67,10 @@ function create_disk_mbr() {
         echo "unit: sectors"
         echo "boot  : start= ${boot_start},     size= ${boot_size},     type=c, bootable"   #create the boot partition
         echo "rootfs: start= ${rootfs_start},   size= ${rootfs_size},   type=83"            #Make a rootfs partition
-    ) | sfdisk --force -uS ${image}
+    ) | sfdisk --force -uS ${image} || {
+        echo "Error: sfdisk failed, the image has no partition table"
+        exit 1
+    }
 
     echo "${FUNCNAME[0]} ok"
 }
@@ -82,13 +85,16 @@ function write_boot_part() {
     local part=$(mktemp)
 
     ls -l ${part}
-    dd if=/dev/zero of=${part} bs=512 count=${boot_size}
-    mkfs.vfat -n ${boot_label} ${part}
+    dd if=/dev/zero of=${part} bs=512 count=${boot_size} || exit 1
+    mkfs.vfat -n ${boot_label} ${part} || {
+        echo "Error: mkfs.vfat failed"
+        exit 1
+    }
 
-    mcopy -i ${part} fip.bin ::
-    mcopy -i ${part} rawimages/boot.* ::boot.sd
+    mcopy -i ${part} fip.bin :: || exit 1
+    mcopy -i ${part} rawimages/boot.* ::boot.sd || exit 1
 
-    dd if=${part} of=${1} seek=${boot_start} bs=512 conv=notrunc,sparse
+    dd if=${part} of=${1} seek=${boot_start} bs=512 conv=notrunc,sparse || exit 1
 
     rm -rf ${part}
     echo "${FUNCNAME[0]} ok"
@@ -102,7 +108,11 @@ function write_rootfs_part() {
     fi
 
     rfs=$(ls -l rawimages/rootfs_ext4.* | awk '{print $NF}')
-    dd if=${rfs} of=${1} seek=${rootfs_start} bs=512 conv=notrunc,sparse
+    if [ ! -f "${rfs}" ]; then
+        echo "Error: the root filesystem ${rfs} does not exist"
+        exit 1
+    fi
+    dd if=${rfs} of=${1} seek=${rootfs_start} bs=512 conv=notrunc,sparse || exit 1
 
     echo "${FUNCNAME[0]} ok"
 }
