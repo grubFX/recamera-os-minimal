@@ -229,32 +229,35 @@ The build goes through the GitHub workflow, not through Docker.
 
 ```
 .github/workflows/main.yml
-  runs-on: ubuntu-24.04
-  run: make ${{ matrix.target }}
+  runs-on: ubuntu-26.04
+  run: make ${{ env.TARGET }}
 ```
 
 The workflow installs the build dependencies with apt and calls `make` directly. The riscv64-musl toolchain and the ccache directory are cached between runs, so a rebuild only compiles what changed.
 
-The workflow needs two additions for the minimal target: a matrix entry and a `push` trigger on `develop`. Right now it only runs on a tag push or a manual dispatch.
+There is no matrix. The only target that exists is `sg2002_recamera_emmc`, and `sg2002_recamera_sd` was removed earlier. The SD board is `sg2002_xiao_sd` and is not built here.
+
+The workflow runs on a push to `develop`, on a tag push and on a manual dispatch. A tag push also creates the GitHub release, with the matching section of `CHANGELOG.md` as the body.
 
 Locally, the Docker daemon does not run on this machine and systemd is offline, so `docker_build.sh` does not work here. The workflow does.
 
-Output lands in `output/sg2002_recamera_minimal/install/soc_sg2002_recamera_minimal/`.
+Output lands in `output/sg2002_recamera_emmc/install/soc_sg2002_recamera_emmc/`.
 
-### Host tools that Debian 13 does not ship
+### Host tools that the distributions do not ship
 
-Two host tools are needed to pack the partitions, and Debian 13 (trixie) does
-not have them in the archive:
+The build runs on two distributions: Debian 13 (trixie) in the devcontainer
+and Ubuntu 26.04 (resolute) on the CI runner. Both dropped PCRE1 and keep
+`sfdisk` in a separate package, so a few tools have to be brought in by hand.
 
 | Tool | Why | Where it comes from |
 |---|---|---|
-| `make_ext4fs` | Packs the `data`, `system` and `rootfs` partitions | Prebuilt in `build/tools/common/prebuild/`. It needs `libpcre.so.3`, so `libpcre3` has to be installed. Debian 13 dropped PCRE1, the package is taken from the Debian pool by the devcontainer `Dockerfile`. |
+| `make_ext4fs` | Packs the `data`, `system` and `rootfs` partitions | Prebuilt in `build/tools/common/prebuild/`. It needs `libpcre.so.3`, so `libpcre3` has to be installed. Debian 13 dropped PCRE1, the package is taken from the Debian pool by the devcontainer `Dockerfile`. Ubuntu has the same gap, the workflow takes the package from the Ubuntu pool. The pool package is the same on every release and only needs libc, so one URL works for both. |
 | `resize2fs` | Shrinks the ext4 image to its minimum size | `e2fsprogs`, which is in the Debian archive. |
 | `sfdisk` | Writes the partition table of the SD card images | The `fdisk` package, which is separate from `util-linux` on Debian 13. |
 | `mkfs.vfat` | Formats the boot partition of the SD card images | `dosfstools`. |
 
 The devcontainer `Dockerfile` installs all of them, so a fresh container
-builds without manual steps.
+builds without manual steps. The workflow installs them with apt.
 
 > The two SD card scripts report "ok" whatever happens. Without `sfdisk`
 > and `mkfs.vfat` they printed "command not found" and carried on, and
