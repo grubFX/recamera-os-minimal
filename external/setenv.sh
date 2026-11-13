@@ -184,13 +184,12 @@ rsync_dir $EXTERNAL/u-boot/ $UBOOT_DIR/
 # build uses both: the submodule builds the host flatc that generates
 # cvimodel_generated.h, and the oss tarball provides the library that gets
 # linked into libcviruntime.so. The generated header has a static_assert on
-# the flatbuffers version, so the two must match. The overlay carries the
-# 2.0.8 build of the musl_riscv64 tarball and replaces the 1.11 one.
-if [ -d "$EXTERNAL/oss/oss_release_tarball" ]; then
-    echo "Applying the oss overlay"
-    rsync -a "$EXTERNAL/oss/oss_release_tarball/" \
-        "$PROJECT_OUT/oss/oss_release_tarball/"
-fi
+# the flatbuffers version, so the two must match.
+#
+# The target library is built from the flatbuffers submodule instead of
+# taken from the tarball, see the patch of build_tpu_sdk.sh below. The stale
+# 1.11 tarball in the oss tree is removed so that nothing can pick it up.
+rm -f "$PROJECT_OUT/oss/oss_release_tarball/musl_riscv64/flatbuffers.tar.gz"
 
 # The cvi_rtsp submodule switched from the master branch to sg200x-dev, which
 # is the branch that matches the middleware of this tree. The old branch had
@@ -330,6 +329,52 @@ sed -i 's/function pack_rootfs/function _pack_rootfs_/g' $PROJECT_OUT/build/comm
 # build flatbuffers
 sed -i 's/cmake -G Ninja -DCMAKE_INSTALL_PREFIX=$FLATBUFFERS_HOST_PATH/cmake -G Ninja -DFLATBUFFERS_BUILD_TESTS=OFF -DCMAKE_INSTALL_PREFIX=$FLATBUFFERS_HOST_PATH/g' \
     $PROJECT_OUT/cviruntime/build_tpu_sdk.sh || exit 1
+
+# The target side of flatbuffers is taken from the oss tarball, which is
+# version 1.11. The host side is built from the flatbuffers submodule, which
+# is version 2.0.8. The generated header carries a static_assert on the
+# flatbuffers version, so a mismatch fails the build. The target library is
+# built from the same submodule instead, so both sides are the same version.
+#
+# The line that extracts the tarball is replaced by a build of the
+# submodule with the riscv64-musl toolchain. The build installs into the
+# same directory the tarball was extracted to, so the rest of the script
+# does not change. BUILD_PATH is set further down in the script, so the
+# build uses TPU_SDK_BUILD_PATH directly.
+python3 - "$PROJECT_OUT/cviruntime/build_tpu_sdk.sh" <<'PYEOF'
+import sys
+path = sys.argv[1]
+s = open(path).read()
+old = '''"$OSS_PATH"/run_build.sh -n flatbuffers -e -t "$OSS_TARBALL_PATH" -i "$TPU_SDK_INSTALL_PATH"/flatbuffers'''
+new = '''# build the target flatbuffers from the submodule, see the note in
+# external/setenv.sh
+FLATBUFFERS_TARGET_PATH=$TPU_SDK_INSTALL_PATH/flatbuffers
+if [ ! -e $TPU_SDK_BUILD_PATH/build_flatbuffers_target ]; then
+  mkdir -p $TPU_SDK_BUILD_PATH/build_flatbuffers_target
+fi
+pushd $TPU_SDK_BUILD_PATH/build_flatbuffers_target
+cmake -G Ninja \\
+  -DCMAKE_TOOLCHAIN_FILE=$TOOLCHAIN_RISCV64_MUSL \\
+  -DCMAKE_BUILD_TYPE=RELEASE \\
+  -DFLATBUFFERS_BUILD_TESTS=OFF \\
+  -DFLATBUFFERS_INSTALL=ON \\
+  -DCMAKE_INSTALL_PREFIX=$FLATBUFFERS_TARGET_PATH \\
+  $TOP_DIR/flatbuffers
+test $? -ne 0 && echo "configure target flatbuffers failed !!" && popd && exit 1
+cmake --build . --target install
+test $? -ne 0 && echo "build target flatbuffers failed !!" && popd && exit 1
+popd'''
+assert s.count(old) == 1, "expected exactly one match, got %d" % s.count(old)
+s = s.replace(old, new, 1)
+open(path, "w").write(s)
+print("patched")
+PYEOF
+
+# build_3rd_party also unpacks the flatbuffers tarball, into the root of the
+# SDK. That one is version 1.11 as well. It is not used by anything, the
+# target library comes from the build above. The entry is taken out of the
+# list so that the 1.11 files do not end up in the SDK.
+sed -i '/^    "flatbuffers"$/d' $PROJECT_OUT/build/envsetup_soc.sh || exit 1
 
 # patch cvi_mpi
 # The vendor release 923e41a (weekly rls 2026.10.28) deleted modules/isp
