@@ -80,8 +80,8 @@
 	branch = sg200x-dev
 [submodule "flatbuffers"]
 	path = flatbuffers
-	url = https://github.com/sophgo/flatbuffers.git
-	branch = master
+	url = https://github.com/google/flatbuffers.git
+	branch = v2.0.8
 [submodule "cnpy"]
 	path = cnpy
 	url = https://github.com/sophgo/cnpy.git

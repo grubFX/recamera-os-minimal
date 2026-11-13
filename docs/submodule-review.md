@@ -4,36 +4,67 @@ Every submodule in the repo, checked for: is it a fork of something upstream, is
 
 ## Summary
 
-The build of the target touches eight of the 27 submodules. The table says
-for each one whether it is used, and if it can be replaced by upstream.
+There are 25 submodules, not 27. The build of the target touches eight of
+them. Nine of the 25 are forks with a known upstream, sixteen are Sophgo
+own code.
 
-| Submodule | Type | Trust | Recommendation |
+| Submodule | Type | Vendor commits over upstream | Recommendation |
 |---|---|---|---|
-| `linux_5.10` | fork of upstream Linux 5.10.4 | good, see below | keep, used |
-| `buildroot-2021.05` | fork of buildroot 2021.05 | good, 6 commits ahead | keep, used |
-| `u-boot-2021.10` | fork of u-boot v2021.10 | good, 3 commits ahead | keep, used |
-| `opensbi` | fork of upstream OpenSBI | good, 10 commits ahead | keep, used |
-| `FreeRTOS-Kernel` | fork of FreeRTOS | outdated (2024) | drop, see below |
-| `Lab-Project-FreeRTOS-POSIX` | fork of FreeRTOS | outdated (2024) | drop |
-| `freertos` | sophgo fork | vendor port | drop with the RTOS |
-| `fsbl` | sophgo, GPL-2.0 | vendor | keep, used |
-| `osdrv` | sophgo, source | vendor, unavoidable | keep, used |
-| `ramdisk` | sophgo, source | vendor | keep, trim |
-| `build` | sophgo, source | vendor | keep, used |
-| `cvi_rtsp` | sophgo, source | vendor | keep, used |
-| `cvi_mpi` | sophgo, source | vendor | keep, used |
-| `isp_tuning` | sophgo, binary tuning files | vendor | keep |
-| `SensorSupportList` | sophgo, BSD-2 | vendor | keep |
-| `oss` | sophgo, tarballs | mixed, see below | trim hard |
-| `host-tools` | sophgo, toolchain | vendor | keep |
-| `flatbuffers` | fork of google/flatbuffers | identical to upstream v2.0.8 | drop with the TPU stack |
-| `cnpy` | sophgo, MIT | only for the TPU | drop |
-| `cvibuilder` | sophgo | only for the TPU | drop |
-| `cvikernel` | sophgo | only for the TPU | drop |
-| `cviruntime` | sophgo | builds the TPU SDK | drop with the TPU stack |
-| `cvimath` | sophgo | only for the TPU | drop |
-| `tdl_sdk` | sophgo | only for the TPU | drop |
-| `ive` | sophgo | image processing, see below | decide |
+| `linux_5.10` | fork of upstream Linux 5.10.4 | 31 | keep, used |
+| `buildroot-2021.05` | fork of buildroot 2021.05 | 6 | keep, used |
+| `u-boot-2021.10` | fork of u-boot v2021.10 | 25 | keep, used |
+| `opensbi` | fork of upstream OpenSBI | 7 | keep, used |
+| `FreeRTOS-Kernel` | fork of FreeRTOS | 1 | drop, see below |
+| `Lab-Project-FreeRTOS-POSIX` | fork of FreeRTOS | 1 | drop |
+| `freertos` | sophgo fork | 7 | drop with the RTOS |
+| `flatbuffers` | fork of google/flatbuffers | **0** | **replace with google/flatbuffers v2.0.8** |
+| `cnpy` | fork of rogersce/cnpy | 1 | drop with the TPU stack |
+| `fsbl` | sophgo, GPL-2.0 | own code | keep, used |
+| `osdrv` | sophgo, source | own code | keep, used |
+| `ramdisk` | sophgo, source | own code | keep, trim |
+| `build` | sophgo, source | own code | keep, used |
+| `cvi_rtsp` | sophgo, source | own code | keep, used |
+| `cvi_mpi` | sophgo, source | own code | keep, **pinned to `693a72a`**, see below |
+| `isp_tuning` | sophgo, binary tuning files | own code | keep |
+| `SensorSupportList` | sophgo, BSD-2 | own code | keep |
+| `oss` | sophgo, tarballs | own code | trim hard |
+| `host-tools` | sophgo, toolchain | own code | keep |
+| `cvibuilder` | sophgo | own code | drop with the TPU stack |
+| `cvikernel` | sophgo | own code | drop with the TPU stack |
+| `cviruntime` | sophgo | own code | drop with the TPU stack |
+| `cvimath` | sophgo | own code | drop with the TPU stack |
+| `tdl_sdk` | sophgo | own code | drop with the TPU stack |
+| `ive` | sophgo | own code | image processing, keep |
+
+## The cvi_mpi release 923e41a is broken
+
+The vendor release `923e41a` (weekly rls 2026.10.28) cannot be built. It
+was pulled in by commit `ad96efd` ("Update all vendor submodules and fix the
+build pipeline"). The release deletes `modules/isp` without putting
+anything in its place, and it leaves several references to the removed
+directories behind. Five separate failures come out of it, and they have
+to be worked around one after the other:
+
+| # | What the vendor did | How the build fails |
+|---|---|---|
+| 1 | deleted `modules/isp` | the samples that go into the image link against `-lisp`, `-lisp_algo`, `-lae`, `-laf`, `-lawb`, `-lcvi_bin`, `-lcvi_bin_isp`. The libraries are gone. |
+| 2 | left `isp` in `SUB_DIRS` of `modules/Makefile` | `make: No such file or directory` for the missing directory |
+| 3 | left `bin` in `SUB_DIRS` | `modules/bin` still exists but needs `isp_bin.h` and `cvi_json_struct_comm.h` from the removed `modules/isp` |
+| 4 | dropped the compile rule for the sensor sources in `component/isp/sensor/<arch>/Makefile_full` | the objects are built with the implicit rule of make, which uses the **host** compiler and no include path. The build produces x86 objects that the riscv linker rejects, and the sensor sources do not find `<linux/cvi_type.h>`. |
+| 5 | `Makefile_full` says `$(TARGET_SO): $(OBJS_PATH)` but the variable is called `OBJS` | `OBJS_PATH` is empty, so the library is linked before the objects exist |
+
+The release before it, `693a72a` (weekly rls 2026.08.24), is consistent. It
+has `modules/isp` with the headers and the implementation, and the sensor
+bug is older than the release and also in `693a72a`.
+
+So the submodule is pinned to `693a72a` and the sensor build gets a patch.
+That is one pin plus one patch, instead of five patches against a release
+whose ISP implementation the vendor deleted on purpose.
+
+> The upstream `modules/isp` in `693a72a` is 98,000 lines of ISP code. The
+> vendor replaced it with `component/isp`, which only holds the sensor
+> drivers, and dropped the ISP implementation itself. There is no public
+> replacement for it, it is the proprietary part of the camera pipeline.
 
 ## The kernel
 
@@ -225,7 +256,11 @@ plus the weekly stable releases. The T-Head patch is a sync of an upstream vendo
 
 ### flatbuffers
 
-A fork of `google/flatbuffers`, last touched July 2024. Upstream is at 25.2. Flatbuffers is used by the TPU SDK. With the TPU stack gone, flatbuffers goes too.
+A fork of `google/flatbuffers`, last touched January 2020. It is not a
+vendor fork in the sense that Sophgo changed something. The commit it sits
+on is upstream flatbuffers 1.11.0 plus 208 upstream commits, and it carries
+zero Sophgo commits. It can be replaced by the Google repository, see
+[Upstream alternatives](#upstream-alternatives).
 
 ## The blobs
 
@@ -384,14 +419,56 @@ It adds the H264 SPS and PPS parameter sets to the SDP, so that a client can dec
 
 ## The TPU stack
 
-`cviruntime`, `cvikernel`, `cvimath`, `cvibuilder`, `cnpy`, `tdl_sdk` and `flatbuffers` are the AI accelerator SDK. They exist to run the sscma models. A camera does not need them. `ive` is different. It is the image processing engine, it does histogram, threshold, alpha blend and similar operations. The ISP tuning and some of the video pipeline use it. Keep it.
+The TPU is the neural network accelerator in the SoC. The CV181x has a
+separate compute unit for it, and it is what the sscma model demos run on.
+The camera itself does not need it.
+
+What the stack consists of, and what each part does:
+
+| Part | What it is |
+|---|---|
+| `cviruntime` | the runtime library. It loads a compiled model and executes it on the TPU. This is the entry point of the whole stack. |
+| `cvikernel` | the kernel driver for the TPU hardware. Registers the device, handles the interrupt and the DMA of the model execution. |
+| `cvimath` | the math library the runtime uses for the layers, matrix operations, quantisation, activations. |
+| `cvibuilder` | the compiler that turns a trained model into the binary format the runtime loads. It also holds the flatbuffers schema of that format. |
+| `cnpy` | reads and writes the NumPy `.npy` and `.npz` files that the training pipeline produces. It is a convenience for the tools, the runtime does not need it. |
+| `tdl_sdk` | the model deployment SDK, the higher level API on top of the runtime, with the pre and post processing around a model. |
+| `flatbuffers` | the serialization format the model file is written in. The model file is a flatbuffer, `cvimodel_tool` reads and writes it. |
+
+The chain runs like this: a trained model comes out of the training pipeline
+as a NumPy file, `cnpy` reads it, `cvibuilder` compiles it into a flatbuffer
+model file, `tdl_sdk` wraps it with the pre and post processing, and
+`cviruntime` executes it on the TPU, which `cvikernel` drives.
+
+### What it costs
+
+The stack is not small and it is not free to build:
+
+- `build_tpu_sdk()` in `build/envsetup_soc.sh` runs `cviruntime/build_tpu_sdk.sh`. That script builds **flatbuffers**, **opencv** and **curl** from source as host tools, then builds the runtime and the kernel driver against them.
+- The result lands in `output/.../tpu_musl_riscv64/cvitek_tpu_sdk`, together with a `third_party` directory that holds 20 source tarballs, including two OpenCV variants.
+
+### What lands in the image
+
+The runtime is not only built, it is flashed. `libcviruntime.so`,
+`libcvikernel.so` and the kernel module `cv181x_tpu.ko` are in the system
+partition. So the stack is currently in the image, it is just not used by
+anything in it.
+
+That means dropping it is not only a build time question. It also needs:
+- `cv181x_tpu.ko` removed from the module list
+- the two shared libraries removed from the target packages
+- `build_tpu_sdk()` removed from the build
+
+`ive` is different. It is the image vector engine, it does histogram,
+threshold, alpha blend and similar operations. The ISP tuning and some of
+the video pipeline use it. Keep it.
 
 ## What is left after the trimming
 
 ```
-linux_5.10          upstream Linux 5.10.4 + 1 vendor commit
-u-boot-2021.10      upstream v2021.10 + 3 vendor commits
-opensbi             upstream v1.2 + 10 vendor commits
+linux_5.10          upstream Linux 5.10.4 + 31 vendor commits
+u-boot-2021.10      upstream v2021.10 + 25 vendor commits
+opensbi             upstream OpenSBI + 7 vendor commits
 fsbl                sophgo, GPL-2.0
 buildroot-2021.05   upstream 2021.05 + 6 vendor commits
 osdrv               the camera drivers, source, unavoidable
@@ -434,7 +511,7 @@ because upstream does not exist for the vendor parts.
 
 ## What the build actually uses
 
-Not all 27 submodules are needed for a build. The build log
+Not all 25 submodules are needed for a build. The build log
 `output/sg2002_recamera_emmc/build-host.log` shows which directories the
 make targets entered:
 
@@ -468,7 +545,7 @@ The remaining submodules are not part of the target build:
 | `cvibuilder` | the TPU Docker setup | no |
 | `cnpy` | NumPy file access for the TPU tools | no |
 | `tdl_sdk` | the model deployment SDK | no |
-| `flatbuffers` | serialization for the TPU | no, the SDK has its own |
+| `flatbuffers` | serialization for the TPU | no, the SDK builds its own from the submodule |
 | `ive` | the image vector engine | no, but the ISP wants it |
 | `freertos` | the RTOS distribution | no |
 | `FreeRTOS-Kernel` | the RTOS kernel | no |
@@ -481,29 +558,154 @@ The remaining submodules are not part of the target build:
 
 ## Upstream alternatives
 
-Eight of the submodules are plain forks with a known upstream. The question
-for each one is whether the vendor delta can be carried as a patch.
+Nine of the 25 submodules are plain forks with a known upstream. For each one
+the question is whether the vendor delta can be carried as a patch.
 
-| Submodule | Upstream | Delta | Can it be replaced? |
-|---|---|---|---|
-| `linux_5.10` | `XUANTIE-RV/linux`, and upstream Linux 5.10 | 250 vendor commits, of which 3 are the actual port | no |
-| `u-boot-2021.10` | `u-boot/u-boot` v2021.10 | 3 vendor commits | no, the board init needs `cvitek.h` |
-| `opensbi` | `riscv-software-src/opensbi` | 1 snapshot commit, patches `platform/template` | no |
-| `buildroot-2021.05` | `buildroot/buildroot` 2021.05 | 6 vendor commits | no, the board config lives here |
-| `flatbuffers` | `google/flatbuffers` | 1 commit, identical to upstream v2.0.8 | yes, it is upstream |
-| `FreeRTOS-Kernel` | `FreeRTOS/FreeRTOS-Kernel` | 1 commit, 9 files changed in the RISC-V and CA53 ports | no |
-| `Lab-Project-FreeRTOS-POSIX` | `FreeRTOS/Lab-Project-FreeRTOS-POSIX` | 1 commit | no |
-| `freertos` | `FreeRTOS/FreeRTOS` | snapshot commits | no |
+The numbers below are measured, not estimated. `Vendor commits` counts the
+commits on top of the upstream branch, `Delta` is the content difference
+against the upstream point the fork was branched from, and `Files` is how
+many files that touches.
+
+| Submodule | Upstream | Vendor commits | Delta | Files | Replaceable? |
+|---|---|---|---|---|---|
+| `flatbuffers` | `google/flatbuffers` | **0** | **0** | 0 | **yes, it is already upstream** |
+| `cnpy` | `rogersce/cnpy` | 1 | 4 files, +655 / -312 | 4 of 9 | possible, but the upstream is dead since 2018 |
+| `buildroot-2021.05` | `buildroot/buildroot` 2021.05 | 6 | 35 files, +1423 / -21 | 35 of 12463 | no, the board config lives here |
+| `FreeRTOS-Kernel` | `FreeRTOS/FreeRTOS-Kernel` V10.4.6 | 1 | 9 files, +528 / -238 | 9 of 609 | no, the RISC-V and CA53 ports are patched |
+| `Lab-Project-FreeRTOS-POSIX` | `FreeRTOS/Lab-Project-FreeRTOS-POSIX` | 1 | 20 files, +350 / -772 | 20 of 36 | no |
+| `opensbi` | `riscv-software-src/opensbi` | 7 | cv181x suspend to RAM, reset ecall, RTC fixes | 6 patches | no |
+| `freertos` | `FreeRTOS/FreeRTOS` | 7 | C906 boot up, tracealyzer | 2 real patches | no |
+| `u-boot-2021.10` | `u-boot/u-boot` v2021.10 | 25 | 290 files, +51302 / -1856 | 290 of 17949 | no, the board init needs `cvitek.h` |
+| `linux_5.10` | `XUANTIE-RV/linux`, and upstream Linux 5.10 | 31 | 2042 files, +544526 / -2107 | 2042 | no |
 
 The answer is no for everything that is used. The reason is the same in
 every case: the vendor delta is not a patch that can be re-applied, it is
-the hardware support. The kernel carries the CVITEK drivers for SDHCI, NAND,
+the hardware support.
+
+### flatbuffers
+
+This one is different, and the earlier note in this document was wrong. It
+said the fork was "identical to upstream v2.0.8". It is not. The fork sits
+on commit `6da1cf79`, which is **flatbuffers 1.11.0 plus 208 upstream
+commits**, dated 2020-01-19. It carries zero Sophgo commits. It is a
+pure upstream snapshot that the vendor never touched again.
+
+So the submodule can simply point at Google. The question is which version.
+
+| Version | Date | What it changes against the current fork |
+|---|---|---|
+| `v1.12.0` | 2020-03-12 | 38 commits, the closest successor of the current stand |
+| `v2.0.0` | 2020-10 | the major version bump, flatbuffers 2.0 changed the generated API |
+| `v2.0.8` | 2022-08-29 | the last 2.0 release, 1248 files differ from the current fork |
+| `v25.x` | 2026 | current upstream, far too large a jump |
+
+`v2.0.8` is the version that is used now. It is a release, it is stable, and
+it is close enough to the current stand that the generated code stays
+compatible. Going to `v25.x` would mean a much larger jump for no gain, the
+TPU SDK does not use anything newer.
+
+#### The two flatbuffers
+
+The TPU build uses flatbuffers twice, and the two have to match:
+
+| Where | What | Version |
+|---|---|---|
+| the `flatbuffers` submodule | the host `flatc` that generates `cvimodel_generated.h` and `parameter_generated.h` | 2.0.8 |
+| the `oss` submodule, `oss_release_tarball/musl_riscv64/flatbuffers.tar.gz` | the library and headers that get linked into `libcviruntime.so` | 2.0.8 |
+
+The generated header has a `static_assert` on the flatbuffers version, so a
+mismatch is a compile error, not a runtime surprise. With the old fork the
+host side was 1.11 and the target side was 1.11, and it worked. With the
+submodule on 2.0.8 the target side had to follow.
+
+The `oss` tarball is a prebuilt binary package from Sophgo, it is not built
+from source. The overlay in `external/oss/oss_release_tarball/musl_riscv64/`
+carries a 2.0.8 build of that tarball and replaces the 1.11 one. It was
+built with the toolchain from `host-tools` and the CMake file
+`cviruntime/scripts/toolchain-riscv64-linux-musl-x86_64.cmake`.
+
+`external/setenv.sh` copies the overlay over the `oss` submodule in the
+output, after the submodule was copied there. The order matters: the
+submodule has to be copied first, otherwise the overlay would be overwritten
+again.
+
+#### What was checked
+
+- `flatc` from `v2.0.8` builds, and `cvibuilder` builds against it
+- the generated headers differ from the old ones only in three ways: a
+  `static_assert` on the version, enums with an explicit `uint8_t` base
+  type, and a size argument for `VerifyField`. No API break
+- the cviruntime sources that use the generated headers compile against both
+  the host and the target toolchain
+- a deliberate mismatch, new headers against the old library, fails with
+  `static assertion failed: Non-compatible flatbuffers version included`.
+  That is the expected behaviour
+- the whole image builds, and `libcviruntime.so`, `libcvikernel.so` and
+  `cv181x_tpu.ko` come out of it
+
+Only one file in the whole TPU stack includes flatbuffers directly,
+`cviruntime/tool/cvimodel_tool.cpp`. Everything else uses the generated
+headers.
+
+> A stale copy of the old library survived in the output from an earlier
+> build. The build does not clean the output, it only copies over it, and the
+> old file had a newer timestamp than the new one, so `cp` left it alone.
+> The result was a `libcviruntime.so` that reported `FlatBuffers 1.11.0`
+> even though everything was built with 2.0.8. Removing the output
+> directory and building again gives the same three copies of the library
+> with the same checksum.
+
+### The other forks
+
+The kernel carries the CVITEK drivers for SDHCI, NAND, I2S, DMA and ION.
+The FreeRTOS fork patches the RISC-V and the CA53 port layers, the context
+switch and the interrupt handling. The u-boot fork adds
+`board/cvitek/cvi_board_init.c` and `include/cvitek/cvitek.h`. The opensbi
+fork adds cv181x suspend to RAM and a reset ecall. None of that can be
+carried as a small patch, and none of it has an upstream equivalent,
+because the hardware has no other driver.
+
+The other direction is the opposite of replacing: going to a newer upstream.
+The kernel is on 5.10 and cannot move. The camera drivers in `osdrv` use
+the two argument `class_create()`, which was removed in kernel 6.4, and
+their version guards stop at 5.10. See `kernel-upgrade.md`.
+
+## Newer versions in the vendor repos
+
+Every submodule was scanned against its vendor repository. Four have a
+branch that is newer than the checked out commit:
+
+| Submodule | Checked out | Newer branch | What it is |
+|---|---|---|---|
+| `cvikernel` | 2024-05-13 | `master` 2026-11-12 | the TPU kernel driver, not used by this target |
+| `cviruntime` | 2026-10-28 | `master` 2026-11-12 | builds the TPU SDK, 15 days newer |
+| `SensorSupportList` | 2026-10-29 | `master` 2026-11-12 | the sensor module list, 14 days newer |
+| `cvi_rtsp` | 2026-06-30 | `master` 2026-10-27 | the RTSP server, 4 months newer |
+
+These are the `master` branches of the same repositories. The vendor keeps
+the board specific work on the `sg200x-dev` branch, and the `master` branch
+is where the newer chips land. `cvikernel` for example has a `master` from
+2026-11-12, but that is the tree for the cv190x, not for the SG2002.
+
+So a blind `git pull` on these four would pull in the code of a different
+SoC generation. They are not updates, they are a different product line.
+The right move for `cviruntime` and `SensorSupportList` is to check whether
+the two week old commits are worth taking, by reading them, not by pulling.
+
+The rest is at the newest commit of the vendor branch that carries the
+SG2002 work.
+
+The vendor repositories also carry branches for the other chips, which are
+not relevant here but show how the vendor organises the work:
+`cv18xx-v4.1.x`, `cv18xx-v4.2.x`, `cv184x-v6.x`, `cv190x-v5.x`, `edge_dev`,
+`bm1688` and `bm1688_dev`.
 I2S, DMA and ION. The FreeRTOS fork patches the RISC-V and the CA53 port
 layers, the context switch and the interrupt handling. The u-boot fork
 adds `board/cvitek/cvi_board_init.c` and `include/cvitek/cvitek.h`.
 
-The one that could go is `flatbuffers`, and only because the TPU stack goes
-with it. It is already upstream, there is nothing to carry over.
+The one that can be replaced is `flatbuffers`. It carries no vendor commits
+at all, so the submodule can point at Google directly, and the newer
+`v2.0.8` produces compatible generated headers.
 
 The other direction is the opposite of replacing: going to a newer upstream.
 The kernel is on 5.10 and cannot move. The camera drivers in `osdrv` use

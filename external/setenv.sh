@@ -88,6 +88,18 @@ rsync_dir ./$UBOOT_DIR
 rsync_dir ./$LINUX_DIR
 rsync_dir ./ramdisk
 rsync_dir ./osdrv
+# The cvi_mpi submodule is pinned to an older vendor release, see the note
+# further down. The checkout has to happen before the tree is copied into the
+# output directory.
+MPI_VERSION=693a72a
+if [ -e "$TOP_DIR/cvi_mpi/.git" ]; then
+    MPI_CURRENT=$(git -C "$TOP_DIR/cvi_mpi" rev-parse --short HEAD)
+    if [ "$MPI_CURRENT" != "$MPI_VERSION" ]; then
+        echo "checking out cvi_mpi $MPI_VERSION"
+        git -C "$TOP_DIR/cvi_mpi" checkout --quiet "$MPI_VERSION" || exit 1
+    fi
+fi
+
 rsync_dir ./cvi_mpi
 rsync_dir ./oss
 rsync_dir ./$BUILDROOT_DIR
@@ -166,6 +178,19 @@ popd
 rsync_dir $EXTERNAL/isp_tuning .
 rsync_dir $EXTERNAL/ramdisk/ ramdisk/
 rsync_dir $EXTERNAL/u-boot/ $UBOOT_DIR/
+
+# The oss submodule ships prebuilt third party tarballs. The flatbuffers one
+# is version 1.11, but the flatbuffers submodule is on 2.0.8, and the TPU
+# build uses both: the submodule builds the host flatc that generates
+# cvimodel_generated.h, and the oss tarball provides the library that gets
+# linked into libcviruntime.so. The generated header has a static_assert on
+# the flatbuffers version, so the two must match. The overlay carries the
+# 2.0.8 build of the musl_riscv64 tarball and replaces the 1.11 one.
+if [ -d "$EXTERNAL/oss/oss_release_tarball" ]; then
+    echo "Applying the oss overlay"
+    rsync -a "$EXTERNAL/oss/oss_release_tarball/" \
+        "$PROJECT_OUT/oss/oss_release_tarball/"
+fi
 
 # The cvi_rtsp submodule switched from the master branch to sg200x-dev, which
 # is the branch that matches the middleware of this tree. The old branch had
@@ -307,7 +332,58 @@ sed -i 's/cmake -G Ninja -DCMAKE_INSTALL_PREFIX=$FLATBUFFERS_HOST_PATH/cmake -G 
     $PROJECT_OUT/cviruntime/build_tpu_sdk.sh || exit 1
 
 # patch cvi_mpi
-sed -i '/LOCAL_CFLAGS = $(DEFS) $(INCS)/i LIBS += -ltinyalsa' $PROJECT_OUT/cvi_mpi/modules/isp/cv181x/isp-tool-daemon/isp_daemon_tool/Makefile || exit 1
+# The vendor release 923e41a (weekly rls 2026.10.28) deleted modules/isp
+# without a replacement. The ISP implementation, the ISP headers in
+# modules/isp/include and the isp_bin headers that modules/bin needs are all
+# gone, but the samples that are installed into the image still link against
+# -lisp, -lisp_algo, -lae, -laf, -lawb, -lcvi_bin and -lcvi_bin_isp. The
+# release also left the module list in modules/Makefile pointing at the
+# removed directories and it lost the compile rule for the sensor sources in
+# component/isp/sensor/<arch>/Makefile_full.
+#
+# The release before it, 693a72a (weekly rls 2026.08.24), is consistent: it
+# has modules/isp with the headers and the implementation, it has no
+# component/isp and it has no broken sensor rule. The submodule is therefore
+# pinned to that release instead of patching five different holes in the
+# newer one.
+# The isp-tool-daemon of the vendor release links against libtinyalsa but does
+# not put it in the link line.
+ISP_DAEMON_MAKEFILE=$PROJECT_OUT/cvi_mpi/modules/isp/cv181x/isp-tool-daemon/isp_daemon_tool/Makefile
+if [ -f "$ISP_DAEMON_MAKEFILE" ]; then
+    echo "patching the cvi_mpi isp-tool-daemon for libtinyalsa"
+    if ! grep -q 'LIBS += -ltinyalsa' "$ISP_DAEMON_MAKEFILE"; then
+        sed -i '/LOCAL_CFLAGS = $(DEFS) $(INCS)/i LIBS += -ltinyalsa' "$ISP_DAEMON_MAKEFILE" || exit 1
+    fi
+fi
+
+# The sensor sources in component/isp/sensor/<arch> have no compile rule.
+# Without it the objects are built with the implicit rule of make, which uses
+# the host compiler and no include path. The build then fails twice: the host
+# compiler produces x86 objects that the riscv linker rejects, and the sensor
+# sources include <linux/cvi_type.h> which is not found.
+#
+# The same file has a typo, the shared library depends on OBJS_PATH but the
+# variable is called OBJS. OBJS_PATH is empty, so the library is linked
+# before the objects exist and the link fails with "cannot find ... .o".
+for CHIP_ARCH_L in cv180x cv181x cv182x sg200x; do
+    MPI_SENSOR_MK=$PROJECT_OUT/cvi_mpi/component/isp/sensor/$CHIP_ARCH_L/Makefile_full
+    if [ -f "$MPI_SENSOR_MK" ]; then
+        echo "fixing the cvi_mpi sensor build for $CHIP_ARCH_L"
+        # remove a rule from an earlier run of this script
+        sed -i '/^\$(SRCS:\.c=\.o): %.o : %.c$/,+2d' "$MPI_SENSOR_MK" || exit 1
+        sed -i '/^EXTRA_CFLAGS += -I\$(MW_INC) -I\$(ISP_INC) -I\$(KERNEL_INC) -I\$(SENSOR_LIST_INC)$/d' \
+            "$MPI_SENSOR_MK" || exit 1
+        sed -i 's|^\$(TARGET_SO): \$(OBJS_PATH)$|$(TARGET_SO): $(OBJS)|' "$MPI_SENSOR_MK" || exit 1
+        cat >> "$MPI_SENSOR_MK" <<'EOF'
+
+EXTRA_CFLAGS += -I$(MW_INC) -I$(ISP_INC) -I$(KERNEL_INC) -I$(SENSOR_LIST_INC)
+
+$(SRCS:.c=.o): %.o : %.c
+	@$(CC) $(DEPFLAGS) $(CFLAGS) $(EXTRA_CFLAGS) -c $< -o $@
+	@echo [$(notdir $(CC))] $(notdir $@)
+EOF
+    fi
+done
 
 # override build_cvi_rtsp function
 sed -i 's/function build_cvi_rtsp()/function _build_cvi_rtsp_()/g' $PROJECT_OUT/build/envsetup_soc.sh || exit 1
