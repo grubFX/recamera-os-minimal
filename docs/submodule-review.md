@@ -17,7 +17,7 @@ own code.
 | `FreeRTOS-Kernel` | fork of FreeRTOS | 1 | drop, see below |
 | `Lab-Project-FreeRTOS-POSIX` | fork of FreeRTOS | 1 | drop |
 | `freertos` | sophgo fork | 7 | drop with the RTOS |
-| `flatbuffers` | fork of google/flatbuffers | **0** | **replace with google/flatbuffers v2.0.8** |
+| `flatbuffers` | **now google/flatbuffers** | **0** | **replaced with google/flatbuffers v2.0.8** |
 | `cnpy` | fork of rogersce/cnpy | 1 | drop with the TPU stack |
 | `fsbl` | sophgo, GPL-2.0 | own code | keep, used |
 | `osdrv` | sophgo, source | own code | keep, used |
@@ -259,7 +259,8 @@ plus the weekly stable releases. The T-Head patch is a sync of an upstream vendo
 A fork of `google/flatbuffers`, last touched January 2020. It is not a
 vendor fork in the sense that Sophgo changed something. The commit it sits
 on is upstream flatbuffers 1.11.0 plus 208 upstream commits, and it carries
-zero Sophgo commits. It can be replaced by the Google repository, see
+zero Sophgo commits. It **has been replaced** by the Google repository at
+tag `v2.0.8`, see
 [Upstream alternatives](#upstream-alternatives).
 
 ## The blobs
@@ -380,7 +381,8 @@ Mostly fine. Classified by content:
 | `eigen` | 424 | 0 | source |
 | `stb` | 82 | 0 | source |
 | `googletest` | 148 | 0 | source |
-| `json-c`, `nlohmannjson`, `glog`, `nanomsg`, `uv`, `zlib`, `miniz`, `sqlite3`, `thttpd`, `flatbuffers` | source | | fine |
+| `json-c`, `nlohmannjson`, `glog`, `nanomsg`, `uv`, `zlib`, `miniz`, `sqlite3`, `thttpd` | source | | fine |
+| `flatbuffers` | source | | **not used**, the SDK builds it from the submodule now |
 | `live555` | 181 headers | 4 archives | **blob** |
 | `opencv_aisdk` | 0 | 0 | **blob** |
 
@@ -611,23 +613,28 @@ The TPU build uses flatbuffers twice, and the two have to match:
 | Where | What | Version |
 |---|---|---|
 | the `flatbuffers` submodule | the host `flatc` that generates `cvimodel_generated.h` and `parameter_generated.h` | 2.0.8 |
-| the `oss` submodule, `oss_release_tarball/musl_riscv64/flatbuffers.tar.gz` | the library and headers that get linked into `libcviruntime.so` | 2.0.8 |
+| the same submodule, built for riscv64-musl | the library and headers that get linked into `libcviruntime.so` | 2.0.8 |
 
 The generated header has a `static_assert` on the flatbuffers version, so a
 mismatch is a compile error, not a runtime surprise. With the old fork the
 host side was 1.11 and the target side was 1.11, and it worked. With the
 submodule on 2.0.8 the target side had to follow.
 
-The `oss` tarball is a prebuilt binary package from Sophgo, it is not built
-from source. The overlay in `external/oss/oss_release_tarball/musl_riscv64/`
-carries a 2.0.8 build of that tarball and replaces the 1.11 one. It was
-built with the toolchain from `host-tools` and the CMake file
-`cviruntime/scripts/toolchain-riscv64-linux-musl-x86_64.cmake`.
+Both sides are built from the same source now. The target library is not
+taken from the `oss` tarball, which is a prebuilt binary package from
+Sophgo and was still on 1.11. `external/setenv.sh` patches
+`cviruntime/build_tpu_sdk.sh` to build the submodule with the riscv64-musl
+toolchain instead of extracting the tarball, using the CMake file
+`cviruntime/scripts/toolchain-riscv64-linux-musl-x86_64.cmake`. The build
+installs into the same directory the tarball was extracted to, so the rest
+of the script does not change and the result has the same layout, the same
+40 files including `bin/flatc`.
 
-`external/setenv.sh` copies the overlay over the `oss` submodule in the
-output, after the submodule was copied there. The order matters: the
-submodule has to be copied first, otherwise the overlay would be overwritten
-again.
+`build_3rd_party` unpacked the same tarball a second time, into the root of
+the SDK. That one was 1.11 too and nothing used it, so the entry is taken
+out of the list there and the stale tarball is removed from the `oss` tree.
+
+Nothing from flatbuffers ends up in the image, it is build material only.
 
 #### What was checked
 
@@ -640,8 +647,10 @@ again.
 - a deliberate mismatch, new headers against the old library, fails with
   `static assertion failed: Non-compatible flatbuffers version included`.
   That is the expected behaviour
-- the whole image builds, and `libcviruntime.so`, `libcvikernel.so` and
-  `cv181x_tpu.ko` come out of it
+- the whole image builds from an empty output directory, and
+  `libcviruntime.so`, `libcvikernel.so` and `cv181x_tpu.ko` come out of it
+- the target flatbuffers that is built from the submodule has the same
+  layout as the tarball it replaces, and reports version 2.0.8
 
 Only one file in the whole TPU stack includes flatbuffers directly,
 `cviruntime/tool/cvimodel_tool.cpp`. Everything else uses the generated
