@@ -111,6 +111,17 @@ It brings `wpa_supplicant`, `hostapd` and the matching configuration files
 in `/etc`. The Bluetooth package and the vendor wifi chip packages are off
 already.
 
+The configuration files need a post-build script to get rid of them.
+Buildroot copies the root filesystem overlay into the target on every
+build and does not remove files from it, so the ones an earlier build
+installed stay there forever:
+
+```
+external/buildroot/configs/cvitek_CV181X_musl_riscv64_defconfig
+  BR2_ROOTFS_POST_BUILD_SCRIPT="board/cvitek/CV181X/post-build.sh"
+  BR2_ROOTFS_POST_SCRIPT_ARGS="board/cvitek/CV181X/overlay"
+```
+
 What HaLow is, for the record: 802.11ah, the WiFi successor to 802.11ac, designed for long range and low power. It runs in the sub-GHz band, so the range is in kilometres rather than metres. It is the right radio for a camera that reports over a long link, and the wrong radio for a camera that hangs on a PoE switch.
 
 The network is Ethernet, and the Ethernet driver is built into the kernel, not a module:
