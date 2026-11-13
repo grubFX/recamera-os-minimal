@@ -46,6 +46,8 @@ RUN apt update && export DEBIAN_FRONTEND=noninteractive \
     squashfs-tools \
     android-sdk-libsparse-utils \
     e2fsprogs \
+    dosfstools \
+    fdisk \
     jq \
     cmake \
     tclsh \
