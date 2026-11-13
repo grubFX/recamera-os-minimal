@@ -250,9 +250,16 @@ not have them in the archive:
 |---|---|---|
 | `make_ext4fs` | Packs the `data`, `system` and `rootfs` partitions | Prebuilt in `build/tools/common/prebuild/`. It needs `libpcre.so.3`, so `libpcre3` has to be installed. Debian 13 dropped PCRE1, the package is taken from the Debian pool by the devcontainer `Dockerfile`. |
 | `resize2fs` | Shrinks the ext4 image to its minimum size | `e2fsprogs`, which is in the Debian archive. |
+| `sfdisk` | Writes the partition table of the SD card images | The `fdisk` package, which is separate from `util-linux` on Debian 13. |
+| `mkfs.vfat` | Formats the boot partition of the SD card images | `dosfstools`. |
 
-The devcontainer `Dockerfile` installs both, so a fresh container builds
-without manual steps.
+The devcontainer `Dockerfile` installs all of them, so a fresh container
+builds without manual steps.
+
+> The two SD card scripts report "ok" whatever happens. Without `sfdisk`
+> and `mkfs.vfat` they printed "command not found" and carried on, and
+> the recovery image and the sd_compat image came out as a file of
+> nothing but zero bytes. The scripts check their exit codes now.
 
 ### Package versions that the board pins
 
