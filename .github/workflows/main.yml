@@ -60,13 +60,15 @@ jobs:
           # The compiler cache holds the object files of the whole tree.
           # The key covers the submodule pointers and the patches and
           # overlays that change what gets compiled.
-          {
-            git submodule status
-            find external/build external/buildroot -type f \
-              \( -name '*.mk' -o -name '*.patch' -o -name '*_defconfig' \
-                 -o -name 'Config.in' -o -name '*.hash' \) -exec md5sum {} +
-          } | md5sum | cut -d' ' -f1 > "$GITHUB_OUTPUT"
-          echo "key=$(cat "$GITHUB_OUTPUT")" >> "$GITHUB_OUTPUT"
+          KEY=$(
+            {
+              git submodule status
+              find external/build external/buildroot -type f \
+                \( -name '*.mk' -o -name '*.patch' -o -name '*_defconfig' \
+                   -o -name 'Config.in' -o -name '*.hash' \) -exec md5sum {} +
+            } | md5sum | cut -d' ' -f1
+          )
+          echo "key=$KEY" >> "$GITHUB_OUTPUT"
 
       - name: Restore the Buildroot download cache
         uses: actions/cache@v6
